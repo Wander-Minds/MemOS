@@ -195,6 +195,34 @@ function resolveRef(ref) {
   fail(`Cannot resolve target ref to a commit: ${value}`);
 }
 
+export function existingReleaseTagState(currentTag, targetSha) {
+  const tagSha = tryGit(["rev-parse", "--verify", `refs/tags/${currentTag}^{commit}`]);
+  const target = String(targetSha || "").trim();
+  if (!tagSha) {
+    return {
+      status: "absent",
+      exists: false,
+      tag_sha: "",
+      target_sha: target,
+      publish_blocked: false,
+      message: `No existing ${currentTag} tag was found; the publish workflow can create it on the target commit.`,
+    };
+  }
+  const matchesTarget = tagSha === target;
+  return {
+    status: matchesTarget ? "matches_target" : "conflicts_target",
+    exists: true,
+    tag_sha: tagSha,
+    short_tag_sha: tagSha.slice(0, 8),
+    target_sha: target,
+    short_target_sha: target.slice(0, 8),
+    publish_blocked: !matchesTarget,
+    message: matchesTarget
+      ? `Existing ${currentTag} tag already points to the target commit; the publish workflow can reuse it.`
+      : `Existing ${currentTag} tag points to ${tagSha.slice(0, 8)}, but the release target is ${target.slice(0, 8)}. Delete or recreate the manual tag after release-owner review, then rerun.`,
+  };
+}
+
 function gitShowJson(ref, path) {
   try {
     return JSON.parse(sh(["show", `${ref}:${path}`]));
@@ -570,6 +598,8 @@ export async function generateGitHubReleaseNotes({
   targetSha,
   previousTag,
   token = process.env.GITHUB_TOKEN || "",
+  forceLocalFallback = false,
+  fallbackWarning = "",
 }) {
   const localFallback = (warning = "") => {
     const subjects = parseLines(tryGit(["log", "--format=%s", `${previousTag}..${targetSha}`]));
@@ -586,6 +616,9 @@ export async function generateGitHubReleaseNotes({
       warning,
     };
   };
+  if (forceLocalFallback) {
+    return localFallback(fallbackWarning || "Existing release tag conflicts with target; using local fallback release notes.");
+  }
   if (!token || !repo.includes("/")) {
     return localFallback(token ? "" : "GITHUB_TOKEN is not available; using local fallback release notes.");
   }
@@ -1141,12 +1174,21 @@ export async function run() {
   const target = resolveRef(targetRefInput);
   const previousTag = process.env.PREVIOUS_TAG || findPreviousMemOSTag(version, currentTag, listTags());
   if (!previousTag) fail(`Cannot find previous MemOS v* tag before ${currentTag}.`);
+  const existingTag = existingReleaseTagState(currentTag, target.sha);
+  if (existingTag.publish_blocked && dryRun !== "true") {
+    fail(existingTag.message);
+  }
+  if (existingTag.publish_blocked) {
+    warn(existingTag.message);
+  }
 
   const releaseNotes = await generateGitHubReleaseNotes({
     repo,
     currentTag,
     targetSha: target.sha,
     previousTag,
+    forceLocalFallback: existingTag.publish_blocked,
+    fallbackWarning: existingTag.message,
   });
   const evidence = collectLocalPluginEvidence({
     previousTag,
@@ -1160,6 +1202,7 @@ export async function run() {
     name: releaseNotes.name,
     body_preview: redact(releaseNotes.body).slice(0, 12000),
   };
+  evidence.existing_tag = existingTag;
 
   const draft = await requestDocAgentDraft(evidence);
   const validation = validateDraft(draft, evidence);
@@ -1203,6 +1246,8 @@ export async function run() {
     release_notes_source: releaseNotes.source,
     current_tag: currentTag,
     previous_tag: previousTag,
+    existing_tag: existingTag,
+    publish_blocked: existingTag.publish_blocked,
     target_ref: target.ref,
     target_sha: target.sha,
     product_paths: evidence.product_paths,
@@ -1241,6 +1286,9 @@ export async function run() {
       `- dry_run: ${dryRun}`,
       `- current_tag: ${currentTag}`,
       `- previous_tag: ${previousTag}`,
+      `- existing_tag_status: ${existingTag.status}`,
+      `- existing_tag_sha: ${existingTag.tag_sha || "n/a"}`,
+      `- publish_blocked: ${existingTag.publish_blocked}`,
       `- target_ref: ${target.ref}`,
       `- target_sha: ${target.sha}`,
       `- product_paths: ${evidence.product_paths.join(", ")}`,
@@ -1280,6 +1328,10 @@ export async function run() {
   appendOutput("source_id", PRODUCT_ID);
   appendOutput("previous_tag", previousTag);
   appendOutput("current_tag", currentTag);
+  appendOutput("existing_tag_status", existingTag.status);
+  appendOutput("existing_tag_sha", existingTag.tag_sha || "");
+  appendOutput("publish_blocked", String(existingTag.publish_blocked));
+  appendOutput("publish_block_reason", existingTag.publish_blocked ? existingTag.message : "");
   appendOutput("target_ref", target.ref);
   appendOutput("target_sha", target.sha);
   appendOutput("has_product_changes", String(evidence.has_product_changes));

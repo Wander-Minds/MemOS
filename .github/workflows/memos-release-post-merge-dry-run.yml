@@ -86,6 +86,10 @@ jobs:
           LATEST_TAG: ${{ steps.version.outputs.latest_tag }}
           CURRENT_TAG: ${{ steps.prepare.outputs.current_tag }}
           PREVIOUS_TAG: ${{ steps.prepare.outputs.previous_tag }}
+          EXISTING_TAG_STATUS: ${{ steps.prepare.outputs.existing_tag_status }}
+          EXISTING_TAG_SHA: ${{ steps.prepare.outputs.existing_tag_sha }}
+          PUBLISH_BLOCKED: ${{ steps.prepare.outputs.publish_blocked }}
+          PUBLISH_BLOCK_REASON: ${{ steps.prepare.outputs.publish_block_reason }}
           HAS_PRODUCT_CHANGES: ${{ steps.prepare.outputs.has_product_changes }}
           HAS_USER_FACING_PRODUCT_CHANGES: ${{ steps.prepare.outputs.has_user_facing_product_changes }}
           DOCS_ACTION: ${{ steps.prepare.outputs.docs_action }}
@@ -99,6 +103,10 @@ jobs:
             echo "- latest_tag_on_main: ${LATEST_TAG}"
             echo "- current_tag: ${CURRENT_TAG}"
             echo "- previous_tag: ${PREVIOUS_TAG}"
+            echo "- existing_tag_status: ${EXISTING_TAG_STATUS}"
+            echo "- existing_tag_sha: ${EXISTING_TAG_SHA:-n/a}"
+            echo "- publish_blocked: ${PUBLISH_BLOCKED}"
+            echo "- publish_block_reason: ${PUBLISH_BLOCK_REASON:-n/a}"
             echo "- release_notes_source: ${RELEASE_NOTES_SOURCE}"
             echo "- local_plugin_changed: ${HAS_PRODUCT_CHANGES}"
             echo "- local_plugin_user_facing_changed: ${HAS_USER_FACING_PRODUCT_CHANGES}"

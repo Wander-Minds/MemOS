@@ -13,6 +13,7 @@ import {
   compareSemver,
   cleanVersion,
   docsPreviewMarkdown,
+  existingReleaseTagState,
   fallbackTopicForText,
   findPreviousMemOSTag,
   generateGitHubReleaseNotes,
@@ -192,6 +193,8 @@ test("inspection artifact contract includes generic aliases and side-effect proo
   assert.match(script, /release_kind:\s+"memos_whole_repo"/);
   assert.match(script, /docs_product_extraction:\s+"path_filtered"/);
   assert.match(script, /public_release_body:\s+"github_generated_whats_changed"/);
+  assert.match(script, /existing_tag:\s+existingTag/);
+  assert.match(script, /publish_blocked:\s+existingTag\.publish_blocked/);
   assert.match(script, /no_side_effects:\s+\{/);
   assert.match(script, /npm_publish:\s+false/);
   assert.match(script, /production_docs_pr:\s+false/);
@@ -203,6 +206,30 @@ test("allows flexible target refs only for dry runs", () => {
   assert.doesNotThrow(() => validateReleaseTarget({ dryRun: "false", targetRef: "main" }));
   assert.throws(() => validateReleaseTarget({ dryRun: "false", targetRef: "origin/main" }), /exactly main/);
   assert.throws(() => validateReleaseTarget({ dryRun: "false", targetRef: "feature/test" }), /exactly main/);
+});
+
+test("reports absent, matching, and conflicting manual release tags", () => {
+  withFixtureRepo(() => {
+    const firstTarget = git(["rev-parse", "HEAD"]).trim();
+    const absent = existingReleaseTagState("v9.9.1", firstTarget);
+    assert.equal(absent.status, "absent");
+    assert.equal(absent.publish_blocked, false);
+
+    git(["tag", "v9.9.1", firstTarget]);
+    const matching = existingReleaseTagState("v9.9.1", firstTarget);
+    assert.equal(matching.status, "matches_target");
+    assert.equal(matching.publish_blocked, false);
+    assert.equal(matching.tag_sha, firstTarget);
+
+    writeRepoFile("apps/memos-local-plugin/src/index.js", "export const newerTarget = true;\n");
+    commitAll("fix(plugin): preserve release target after manual tag (#10)");
+    const finalTarget = git(["rev-parse", "HEAD"]).trim();
+    const conflicting = existingReleaseTagState("v9.9.1", finalTarget);
+    assert.equal(conflicting.status, "conflicts_target");
+    assert.equal(conflicting.publish_blocked, true);
+    assert.equal(conflicting.tag_sha, firstTarget);
+    assert.match(conflicting.message, /will not|Delete or recreate|points to/i);
+  });
 });
 
 test("validates a bilingual source-referenced plugin docs draft", () => {

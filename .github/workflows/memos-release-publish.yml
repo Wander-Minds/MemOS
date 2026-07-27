@@ -84,6 +84,10 @@ jobs:
         env:
           CURRENT_TAG: ${{ steps.prepare.outputs.current_tag }}
           PREVIOUS_TAG: ${{ steps.prepare.outputs.previous_tag }}
+          EXISTING_TAG_STATUS: ${{ steps.prepare.outputs.existing_tag_status }}
+          EXISTING_TAG_SHA: ${{ steps.prepare.outputs.existing_tag_sha }}
+          PUBLISH_BLOCKED: ${{ steps.prepare.outputs.publish_blocked }}
+          PUBLISH_BLOCK_REASON: ${{ steps.prepare.outputs.publish_block_reason }}
           SOURCE_ID: ${{ steps.prepare.outputs.source_id }}
           TARGET_REF: ${{ steps.prepare.outputs.target_ref }}
           TARGET_SHA: ${{ steps.prepare.outputs.target_sha }}
@@ -101,6 +105,10 @@ jobs:
             echo "- source_id: ${SOURCE_ID}"
             echo "- current_tag: ${CURRENT_TAG}"
             echo "- previous_tag: ${PREVIOUS_TAG}"
+            echo "- existing_tag_status: ${EXISTING_TAG_STATUS}"
+            echo "- existing_tag_sha: ${EXISTING_TAG_SHA:-n/a}"
+            echo "- publish_blocked: ${PUBLISH_BLOCKED}"
+            echo "- publish_block_reason: ${PUBLISH_BLOCK_REASON:-n/a}"
             echo "- target_ref: ${TARGET_REF}"
             echo "- target_sha: ${TARGET_SHA}"
             echo "- release_notes_source: ${RELEASE_NOTES_SOURCE}"
@@ -129,8 +137,14 @@ jobs:
           TARGET_SHA: ${{ steps.prepare.outputs.target_sha }}
           RELEASE_NOTES_FILE: ${{ steps.prepare.outputs.release_notes_file }}
           CREATE_DRAFT_RELEASE: ${{ inputs.create_draft_release }}
+          PUBLISH_BLOCKED: ${{ steps.prepare.outputs.publish_blocked }}
+          PUBLISH_BLOCK_REASON: ${{ steps.prepare.outputs.publish_block_reason }}
         run: |
           set -euo pipefail
+          if [ "${PUBLISH_BLOCKED}" = "true" ]; then
+            echo "::error::${PUBLISH_BLOCK_REASON}"
+            exit 1
+          fi
 
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
@@ -142,7 +156,7 @@ jobs:
 
           if [ -n "${remote_tag_sha}" ]; then
             if [ "${remote_tag_sha}" != "${TARGET_SHA}" ]; then
-              echo "::error::Remote tag ${CURRENT_TAG} already exists at ${remote_tag_sha}, expected ${TARGET_SHA}."
+              echo "::error::Remote tag ${CURRENT_TAG} already exists at ${remote_tag_sha}, expected ${TARGET_SHA}. This workflow will not move an existing release tag automatically; delete or recreate the manual tag after release-owner review, then rerun."
               exit 1
             fi
             echo "::notice::Remote tag ${CURRENT_TAG} already exists at ${TARGET_SHA}; leaving it unchanged."
