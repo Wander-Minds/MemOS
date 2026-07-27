@@ -17,6 +17,7 @@ import {
   fallbackTopicForText,
   findPreviousMemOSTag,
   generateGitHubReleaseNotes,
+  requestDocAgentDraft,
   sourceRefsFromText,
   validateDraft,
   validatePublishConfirmation,
@@ -299,6 +300,41 @@ test("filters mixed MemOS release evidence down to local-plugin paths", () => {
     assert.equal(result.required_source_refs.length, 1);
     assert.ok(result.required_source_refs[0].accepted_refs.includes("#11"));
     assert.ok(result.important_diff["apps/memos-local-plugin/**"][0].path.endsWith("provider-routing.js"));
+  });
+});
+
+test("filters standalone local-plugin release metadata from docs evidence", () => {
+  withFixtureRepo(() => {
+    writeRepoFile("apps/memos-local-plugin/tests/e2e/v7-full-chain.e2e.test.ts", "export const v7Defaults = true;\n");
+    commitAll("fix(plugin): preserve V7 session defaults (#11)");
+
+    writeRepoFile(
+      "apps/memos-local-plugin/package.json",
+      `${JSON.stringify({ name: "@memtensor/memos-local-plugin", version: "9.9.1" }, null, 2)}\n`,
+    );
+    writeRepoFile("apps/memos-local-plugin/package-lock.json", "{\"lockfileVersion\": 3}\n");
+    commitAll("release: @memtensor/memos-local-plugin v9.9.1 (#12)");
+
+    const result = collectLocalPluginEvidence({
+      previousTag: "v9.9.0",
+      currentTag: "v9.9.1",
+      currentRef: "HEAD",
+      targetVersion: "9.9.1",
+      repo: "MemTensor/MemOS",
+    });
+
+    assert.equal(result.has_product_changes, true);
+    assert.equal(result.has_user_facing_product_changes, true);
+    assert.deepEqual(
+      result.commits.map((commit) => commit.subject),
+      ["fix(plugin): preserve V7 session defaults (#11)"],
+    );
+    assert.deepEqual(
+      result.important_commits.map((commit) => commit.subject),
+      ["fix(plugin): preserve V7 session defaults (#11)"],
+    );
+    assert.deepEqual(result.pull_requests.map((pr) => pr.number), ["11"]);
+    assert.deepEqual(result.required_source_refs.map((item) => item.accepted_refs.includes("#11")), [true]);
   });
 });
 
@@ -620,6 +656,51 @@ test("accepts concise impact-oriented Chinese plugin docs copy", () => {
     evidence,
   );
   assert.equal(result.ok, true);
+});
+
+test("allows the draft service one initial response plus three repair attempts", async () => {
+  const originalFetch = globalThis.fetch;
+  const originalUrl = process.env.DOC_AGENT_RELEASE_NOTES_DRAFT_URL;
+  const originalToken = process.env.DOC_AGENT_RELEASE_NOTES_DRAFT_TOKEN;
+  const originalOffline = process.env.ALLOW_OFFLINE_DOCS_PREVIEW;
+  const invalidDraft = {
+    ...validDraft,
+    release_items: [validDraft.release_items[0]],
+  };
+  const userFacingEvidence = {
+    ...evidence,
+    has_user_facing_product_changes: true,
+  };
+
+  let callCount = 0;
+  try {
+    process.env.DOC_AGENT_RELEASE_NOTES_DRAFT_URL = "https://example.invalid/internal/release-notes/draft";
+    process.env.DOC_AGENT_RELEASE_NOTES_DRAFT_TOKEN = "test-token";
+    delete process.env.ALLOW_OFFLINE_DOCS_PREVIEW;
+    globalThis.fetch = async () => {
+      callCount += 1;
+      return {
+        ok: true,
+        status: 200,
+        text: async () => JSON.stringify(callCount < 4 ? invalidDraft : validDraft),
+      };
+    };
+
+    const draft = await requestDocAgentDraft(userFacingEvidence);
+
+    assert.equal(callCount, 4);
+    assert.equal(draft.validation_attempt_count, 4);
+    assert.equal(draft.repair_attempt_count, 3);
+    assert.equal(draft.validation_report.ok, true);
+  } finally {
+    globalThis.fetch = originalFetch;
+    if (originalUrl === undefined) delete process.env.DOC_AGENT_RELEASE_NOTES_DRAFT_URL;
+    else process.env.DOC_AGENT_RELEASE_NOTES_DRAFT_URL = originalUrl;
+    if (originalToken === undefined) delete process.env.DOC_AGENT_RELEASE_NOTES_DRAFT_TOKEN;
+    else process.env.DOC_AGENT_RELEASE_NOTES_DRAFT_TOKEN = originalToken;
+    if (originalOffline === undefined) delete process.env.ALLOW_OFFLINE_DOCS_PREVIEW;
+    else process.env.ALLOW_OFFLINE_DOCS_PREVIEW = originalOffline;
+  }
 });
 
 test("builds Plugin tab previews without exposing source refs in page content", () => {

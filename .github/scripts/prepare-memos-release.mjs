@@ -19,6 +19,7 @@ export const RELEASE_TO_DOC_CATEGORY = {
   Fixed: "Bug Fixes",
 };
 export const MAX_REPAIR_ATTEMPTS = 3;
+export const MAX_DRAFT_ATTEMPTS = MAX_REPAIR_ATTEMPTS + 1;
 const MAX_RELEASE_ITEMS = 12;
 const MAX_TEXT_CN_CHARS = 180;
 const MAX_TEXT_EN_CHARS = 220;
@@ -294,12 +295,26 @@ function isRevertedCommit(commit, revertedKeys, { matchSubject = false } = {}) {
 function isImportantCommit(commit, { revertedKeys = new Set() } = {}) {
   if (isRevertedCommit(commit, revertedKeys)) return false;
   const subject = String(commit.subject || "");
+  if (isMaintenanceOnlyCommit(commit)) return false;
   if (/^merge\b/i.test(subject)) return false;
   if (/^(ci|chore|docs|test|style)(\([^)]+\))?:/i.test(subject)) return false;
   if (/^chore:\s*update version/i.test(subject)) return false;
   if (/^release:\s*merge\b/i.test(subject)) return true;
   if (/^revert\b/i.test(subject)) return false;
   return /^(feat|fix|perf|refactor|revert)(\([^)]+\))?:|add|improve|optimi[sz]e|compat|memory|plugin|openclaw|gateway|provider|hermes/i.test(subject);
+}
+
+function isMaintenanceOnlyCommit(commit) {
+  const subject = String(commit?.subject || "");
+  if (/^release:\s*merge\b/i.test(subject)) return false;
+  if (/^release:\s+(?:@memtensor\/memos-local-plugin|memos-local-plugin\b|openclaw local plugin\b)/i.test(subject)) {
+    return true;
+  }
+  if (/^(?:chore|build|ci)(\([^)]+\))?:\s*(?:release|bump|update)\b.*(?:@memtensor\/memos-local-plugin|memos-local-plugin)/i.test(subject)) {
+    return true;
+  }
+  if (/^chore:\s*update version/i.test(subject)) return true;
+  return false;
 }
 
 function isReleaseMergeCommit(commit) {
@@ -320,7 +335,7 @@ function isExplicitLocalPluginAggregate(text) {
 function pathScopedPrRefs(commits) {
   const refs = new Set();
   for (const commit of commits) {
-    if (isReleaseMergeCommit(commit)) continue;
+    if (isReleaseMergeCommit(commit) || isMaintenanceOnlyCommit(commit)) continue;
     for (const ref of sourceRefsFromText(commit.subject)) refs.add(ref);
   }
   return refs;
@@ -352,6 +367,7 @@ function releaseAggregateItems(
       if (/^#\s*/.test(text)) continue;
       if (/^(co-authored-by|signed-off-by|---------|# conflicts:)/i.test(text)) continue;
       if (/^(ci|chore|docs|test|style)(\([^)]+\))?:/i.test(text)) continue;
+      if (isMaintenanceOnlyCommit({ subject: text })) continue;
       if (isRevertedAggregateText(text, revertedKeys)) continue;
       const textKey = text.toLowerCase().replace(/\s+/g, " ").trim();
       if (seenText.has(textKey)) continue;
@@ -374,6 +390,7 @@ function evidenceCommitsForRelease(commits, aggregateItems, { revertedKeys = new
   const synthetic = aggregateItems
     .filter((item) => !/^revert\b/i.test(String(item.text || "")))
     .filter((item) => !isRevertedAggregateText(item.text, revertedKeys))
+    .filter((item) => !isMaintenanceOnlyCommit({ subject: item.text }))
     .map((item) => {
       const prRefs = (item.source_refs || []).filter((ref) => String(ref).startsWith("#"));
       const sourceRefs = prRefs.length ? prRefs : [item.source_commit].filter(Boolean);
@@ -387,7 +404,12 @@ function evidenceCommitsForRelease(commits, aggregateItems, { revertedKeys = new
       };
     });
   if (synthetic.length) return synthetic;
-  return commits.filter((commit) => !/^revert\b/i.test(String(commit.subject || "")) && !isRevertedCommit(commit, revertedKeys));
+  return commits.filter(
+    (commit) =>
+      !/^revert\b/i.test(String(commit.subject || "")) &&
+      !isRevertedCommit(commit, revertedKeys) &&
+      !isMaintenanceOnlyCommit(commit),
+  );
 }
 
 function localPluginSkipReason({ changedFiles = [], importantCommits = [] }) {
@@ -986,7 +1008,7 @@ export function validateDraft(draft, evidence) {
   };
 }
 
-async function requestDocAgentDraft(evidence) {
+export async function requestDocAgentDraft(evidence) {
   if (!evidence.has_user_facing_product_changes) {
     return {
       ok: true,
@@ -1009,7 +1031,7 @@ async function requestDocAgentDraft(evidence) {
 
   const attempts = [];
   let repairContext = null;
-  for (let attempt = 1; attempt <= MAX_REPAIR_ATTEMPTS; attempt += 1) {
+  for (let attempt = 1; attempt <= MAX_DRAFT_ATTEMPTS; attempt += 1) {
     const payload = await fetchJsonWithRetry(
       url,
       {
@@ -1054,7 +1076,7 @@ async function requestDocAgentDraft(evidence) {
       ],
     };
   }
-  fail(`Doc Agent draft failed validation after ${MAX_REPAIR_ATTEMPTS} attempts: ${JSON.stringify(attempts.at(-1)?.validation?.issues || [])}`);
+  fail(`Doc Agent draft failed validation after ${MAX_REPAIR_ATTEMPTS} repair attempts: ${JSON.stringify(attempts.at(-1)?.validation?.issues || [])}`);
 }
 
 export function buildDocsPreview(draft, evidence) {
