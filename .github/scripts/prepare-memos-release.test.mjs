@@ -302,6 +302,12 @@ test("accepts concise impact-oriented Chinese plugin docs copy", () => {
 
 test("builds Plugin tab previews without exposing source refs in page content", () => {
   const preview = buildDocsPreview(validDraft, evidence);
+  assert.equal(preview.source_id, "openclaw-local-plugin");
+  assert.equal(preview.source_repo, "MemTensor/MemOS");
+  assert.equal(preview.previous_tag, "v2.0.24");
+  assert.equal(preview.current_tag, "v2.0.25");
+  assert.equal(preview.would_create_docs_pr, false);
+  assert.deepEqual(preview.files, ["content/cn/plugin-changelog.yml", "content/en/plugin-changelog.yml"]);
   assert.equal(preview.cn.name, "v2.0.25");
   assert.equal(preview.cn.source.repo, "MemTensor/MemOS");
   assert.deepEqual(preview.cn.source.product_paths, ["apps/memos-local-plugin/**"]);

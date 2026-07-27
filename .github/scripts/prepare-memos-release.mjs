@@ -940,7 +940,18 @@ export function buildDocsPreview(draft, evidence) {
       },
     };
   };
-  return { cn: makeSide("zh"), en: makeSide("en") };
+  return {
+    source_id: PRODUCT_ID,
+    source_repo: evidence.repo,
+    source_ref: evidence.git_ref,
+    previous_tag: evidence.previous_tag,
+    current_tag: evidence.current_tag,
+    product_paths: evidence.product_paths,
+    would_create_docs_pr: false,
+    files: ["content/cn/plugin-changelog.yml", "content/en/plugin-changelog.yml"],
+    cn: makeSide("zh"),
+    en: makeSide("en"),
+  };
 }
 
 export function docsPreviewMarkdown(preview, draft, evidence) {
