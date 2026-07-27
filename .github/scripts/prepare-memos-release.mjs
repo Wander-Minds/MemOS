@@ -457,11 +457,13 @@ export function collectLocalPluginEvidence({ previousTag, currentTag, currentRef
       style_policy: [
         "Each bullet should explain the user-facing impact in one sentence.",
         "Avoid generic restatements such as '新增了 X 功能', '优化了 X 性能', or '修复了 X 问题'.",
+        "Avoid raw commit subject wording such as 'fix(plugin): ... (#123)'; rewrite it into product-facing copy.",
         "A good bullet names the capability and says why it matters for OpenClaw local plugin users.",
       ],
       curation_policy: [
         "Use Conventional Commit type/scope as a hint, not as final copy.",
         "Group related commits or PR aggregate items into user-facing topics so Plugin tab output stays readable.",
+        "Merge duplicate or near-duplicate bullets and preserve the combined source_refs.",
         "Keep every covered source_ref in the draft and inspection artifact even when several commits become one bullet.",
         "Do not surface chore/docs/test-only noise unless it changes user-visible local plugin behavior.",
       ],
@@ -754,6 +756,32 @@ function isGenericChineseDocsText(text) {
   return /^(新增了|修复了|优化了|增加了).{1,40}(功能|问题|性能|能力)[。.]?$/.test(body);
 }
 
+function isGenericEnglishDocsText(text) {
+  const body = stripBoldPrefix(text)
+    .toLowerCase()
+    .replace(/\s+/g, " ")
+    .trim();
+  if (/\b(to|so|because|when|during|for)\b/.test(body)) return false;
+  return /^(added|fixed|improved|updated|enhanced)\b.{1,60}\b(feature|functionality|issue|bug|problem|performance|capability)\.?$/.test(body);
+}
+
+function hasRawCommitSubjectText(text) {
+  return /\b(feat|fix|perf|refactor|chore|docs|test|ci|build|style|revert)(\([^)]+\))?!?:\s+/i.test(
+    String(text || ""),
+  );
+}
+
+function duplicateKeyForItem(item) {
+  return [item.category, item.text_cn, item.text_en]
+    .map((value) =>
+      stripBoldPrefix(value)
+        .toLowerCase()
+        .replace(/[#`*_()[\]{}:：,，。.;；!！?\s-]+/g, " ")
+        .trim(),
+    )
+    .join("|");
+}
+
 export function validateDraft(draft, evidence) {
   const issues = [];
   const validRefs = new Set();
@@ -774,7 +802,20 @@ export function validateDraft(draft, evidence) {
     });
   }
 
+  const duplicateItems = new Map();
+
   for (const [index, item] of draft.release_items.entries()) {
+    const duplicateKey = duplicateKeyForItem(item);
+    if (duplicateKey && duplicateItems.has(duplicateKey)) {
+      issues.push({
+        kind: "duplicate_release_item",
+        index,
+        duplicate_of: duplicateItems.get(duplicateKey),
+        message: "duplicate release item should be merged with combined source_refs",
+      });
+    } else if (duplicateKey) {
+      duplicateItems.set(duplicateKey, index);
+    }
     if (!RELEASE_CATEGORY_ORDER.includes(item.category)) {
       issues.push({ kind: "invalid_category", index, message: `invalid category ${item.category}` });
     }
@@ -804,6 +845,26 @@ export function validateDraft(draft, evidence) {
         index,
         message: "text_cn restates the change too generically; include concrete user-facing impact.",
       });
+    }
+    if (isGenericEnglishDocsText(item.text_en)) {
+      issues.push({
+        kind: "generic_text_en",
+        index,
+        message: "text_en restates the change too generically; include concrete user-facing impact.",
+      });
+    }
+    for (const [field, value] of [
+      ["text_cn", item.text_cn],
+      ["text_en", item.text_en],
+    ]) {
+      if (hasRawCommitSubjectText(value)) {
+        issues.push({
+          kind: "raw_commit_subject_text",
+          index,
+          field,
+          message: `${field} should not copy raw Conventional Commit subject text.`,
+        });
+      }
     }
     if (!item.source_refs.length) {
       issues.push({ kind: "missing_source_refs", index, message: "source_refs is required" });
@@ -902,6 +963,9 @@ async function requestDocAgentDraft(evidence) {
         "Keep facts within the provided evidence.",
         "Return release_items with category, text_cn, text_en, and source_refs.",
         "For generic_text_cn issues, explain concrete user-facing impact without inventing facts.",
+        "For generic_text_en issues, explain concrete user-facing impact in English.",
+        "For raw_commit_subject_text issues, remove Conventional Commit prefixes and PR-number prose from the user-facing text.",
+        "For duplicate_release_item issues, merge duplicate bullets and combine their source_refs.",
       ],
     };
   }

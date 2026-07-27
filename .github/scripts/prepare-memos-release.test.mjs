@@ -283,6 +283,60 @@ test("rejects generic Chinese plugin docs copy", () => {
   assert.ok(result.issues.some((issue) => issue.kind === "generic_text_cn"));
 });
 
+test("rejects generic English plugin docs copy", () => {
+  const result = validateDraft(
+    {
+      ...validDraft,
+      release_items: [
+        {
+          ...validDraft.release_items[0],
+          text_en: "**Local plugin update**: Fixed local plugin issue.",
+        },
+        validDraft.release_items[1],
+      ],
+    },
+    evidence,
+  );
+  assert.equal(result.ok, false);
+  assert.ok(result.issues.some((issue) => issue.kind === "generic_text_en"));
+});
+
+test("rejects raw Conventional Commit subjects copied into docs copy", () => {
+  const result = validateDraft(
+    {
+      ...validDraft,
+      release_items: [
+        {
+          ...validDraft.release_items[0],
+          text_en: "**V7 defaults**: fix(plugin): preserve V7 session defaults (#2158).",
+        },
+        validDraft.release_items[1],
+      ],
+    },
+    evidence,
+  );
+  assert.equal(result.ok, false);
+  assert.ok(result.issues.some((issue) => issue.kind === "raw_commit_subject_text" && issue.field === "text_en"));
+});
+
+test("rejects duplicate plugin docs bullets that should be merged", () => {
+  const result = validateDraft(
+    {
+      ...validDraft,
+      release_items: [
+        validDraft.release_items[0],
+        {
+          ...validDraft.release_items[0],
+          source_refs: ["59c14746"],
+        },
+      ],
+    },
+    evidence,
+  );
+  assert.equal(result.ok, false);
+  assert.ok(result.issues.some((issue) => issue.kind === "duplicate_release_item"));
+});
+
 test("accepts concise impact-oriented Chinese plugin docs copy", () => {
   const result = validateDraft(
     {
