@@ -517,10 +517,10 @@ export async function generateGitHubReleaseNotes({
   previousTag,
   token = process.env.GITHUB_TOKEN || "",
 }) {
-  if (!token || !repo.includes("/")) {
+  const localFallback = (warning = "") => {
     const subjects = parseLines(tryGit(["log", "--format=%s", `${previousTag}..${targetSha}`]));
     return {
-      source: "local-fallback",
+      source: warning ? "local-fallback-after-github-error" : "local-fallback",
       name: `Release ${currentTag}`,
       body: [
         "## What's Changed",
@@ -529,32 +529,46 @@ export async function generateGitHubReleaseNotes({
         `**Full Changelog**: https://github.com/${repo || "MemTensor/MemOS"}/compare/${previousTag}...${currentTag}`,
         "",
       ].join("\n"),
+      warning,
     };
-  }
-  const payload = await fetchJsonWithRetry(
-    `https://api.github.com/repos/${repo}/releases/generate-notes`,
-    {
-      method: "POST",
-      headers: {
-        accept: "application/vnd.github+json",
-        authorization: `Bearer ${token}`,
-        "content-type": "application/json",
-        "x-github-api-version": "2026-03-10",
-      },
-      body: JSON.stringify({
-        tag_name: currentTag,
-        target_commitish: targetSha,
-        previous_tag_name: previousTag,
-      }),
-    },
-    { label: "generate GitHub release notes" },
-  );
-  if (!String(payload.body || "").trim()) fail("GitHub generated release notes response was empty.");
-  return {
-    source: "github-generate-notes-api",
-    name: String(payload.name || `Release ${currentTag}`),
-    body: payload.body,
   };
+  if (!token || !repo.includes("/")) {
+    return localFallback(token ? "" : "GITHUB_TOKEN is not available; using local fallback release notes.");
+  }
+
+  try {
+    const payload = await fetchJsonWithRetry(
+      `https://api.github.com/repos/${repo}/releases/generate-notes`,
+      {
+        method: "POST",
+        headers: {
+          accept: "application/vnd.github+json",
+          authorization: `Bearer ${token}`,
+          "content-type": "application/json",
+          "x-github-api-version": "2026-03-10",
+        },
+        body: JSON.stringify({
+          tag_name: currentTag,
+          target_commitish: targetSha,
+          previous_tag_name: previousTag,
+        }),
+      },
+      { label: "generate GitHub release notes" },
+    );
+    if (!String(payload.body || "").trim()) fail("GitHub generated release notes response was empty.");
+    return {
+      source: "github-generate-notes-api",
+      name: String(payload.name || `Release ${currentTag}`),
+      body: payload.body,
+      warning: "",
+    };
+  } catch (error) {
+    const message = redact(error?.message || error);
+    const allowOffline = String(process.env.ALLOW_OFFLINE_DOCS_PREVIEW || "").toLowerCase() === "true";
+    if (!allowOffline) throw error;
+    warn(`GitHub generated release notes failed; using local fallback: ${message}`);
+    return localFallback(message);
+  }
 }
 
 const FALLBACK_TOPIC_RULES = [

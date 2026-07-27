@@ -8,6 +8,7 @@ import {
   cleanVersion,
   docsPreviewMarkdown,
   findPreviousMemOSTag,
+  generateGitHubReleaseNotes,
   sourceRefsFromText,
   validateDraft,
   validatePublishConfirmation,
@@ -138,6 +139,21 @@ test("release note methodology records the sources used for quality policy", () 
   assert.ok(RELEASE_NOTE_METHODS.some((item) => item.source === "keep-a-changelog"));
   assert.ok(RELEASE_NOTE_METHODS.some((item) => item.source === "conventional-commits"));
   assert.ok(RELEASE_NOTE_METHODS.every((item) => item.url.startsWith("https://")));
+});
+
+test("GitHub release notes fallback stays whole-repo when API access is unavailable", async () => {
+  const result = await generateGitHubReleaseNotes({
+    repo: "MemTensor/MemOS",
+    currentTag: "v0.0.0-test",
+    targetSha: "HEAD",
+    previousTag: "HEAD",
+    token: "",
+  });
+  assert.equal(result.source, "local-fallback-after-github-error");
+  assert.match(result.body, /## What's Changed/);
+  assert.match(result.body, /Full Changelog/);
+  assert.doesNotMatch(result.body, /source_refs/);
+  assert.doesNotMatch(result.body, /doc-agent-release-notes-json/);
 });
 
 test("rejects English text that still contains Chinese", () => {
