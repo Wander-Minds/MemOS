@@ -274,15 +274,48 @@ function isImportantCommit(commit, { revertedKeys = new Set() } = {}) {
   return /^(feat|fix|perf|refactor|revert)(\([^)]+\))?:|add|improve|optimi[sz]e|compat|memory|plugin|openclaw|gateway|provider|hermes/i.test(subject);
 }
 
+function isReleaseMergeCommit(commit) {
+  return /^release:\s*merge\b/i.test(String(commit?.subject || ""));
+}
+
 function commitBodyExcerpt(sha) {
   const body = tryGit(["show", "--no-patch", "--format=%B", sha]);
   return redact(body).slice(0, 24000);
 }
 
-function releaseAggregateItems(commits) {
-  const items = [];
+function isExplicitLocalPluginAggregate(text) {
+  const localPluginPattern =
+    /(apps\/memos-local-plugin|memos-local-plugin|local[- ]plugin|openclaw local plugin|plugin gateway|standalone bridge|viewer dashboard|hermes)/i;
+  return localPluginPattern.test(String(text || ""));
+}
+
+function pathScopedPrRefs(commits) {
+  const refs = new Set();
   for (const commit of commits) {
-    if (!/^release:\s*merge\b/i.test(String(commit.subject || ""))) continue;
+    if (isReleaseMergeCommit(commit)) continue;
+    for (const ref of sourceRefsFromText(commit.subject)) refs.add(ref);
+  }
+  return refs;
+}
+
+function isPathScopedAggregateItem(text, refs, pathRefs) {
+  if (refs.some((ref) => pathRefs.has(ref))) return true;
+  return isExplicitLocalPluginAggregate(text);
+}
+
+function isRevertedAggregateText(text, revertedKeys) {
+  if (/^revert\b/i.test(String(text || ""))) return true;
+  return isRevertedCommit({ subject: text }, revertedKeys);
+}
+
+function releaseAggregateItems(
+  commits,
+  { pathRefs = pathScopedPrRefs(commits), revertedKeys = revertedCommitKeys(commits) } = {},
+) {
+  const items = [];
+  const seenText = new Set();
+  for (const commit of commits) {
+    if (!isReleaseMergeCommit(commit)) continue;
     for (const rawLine of String(commit.body_excerpt || "").split("\n")) {
       const line = rawLine.trim();
       if (!/^\*\s+/.test(line)) continue;
@@ -290,9 +323,14 @@ function releaseAggregateItems(commits) {
       if (!text || text === commit.subject) continue;
       if (/^#\s*/.test(text)) continue;
       if (/^(co-authored-by|signed-off-by|---------|# conflicts:)/i.test(text)) continue;
-      if (!/(#\d+|openclaw|memos-local|plugin|bridge|viewer|capture|reflection|llm|logging|openrouter|gateway|hermes|recovery|reward|episode|memory|provider)/i.test(text)) continue;
+      if (/^(ci|chore|docs|test|style)(\([^)]+\))?:/i.test(text)) continue;
+      if (isRevertedAggregateText(text, revertedKeys)) continue;
+      const textKey = text.toLowerCase().replace(/\s+/g, " ").trim();
+      if (seenText.has(textKey)) continue;
       const refs = sourceRefsFromText(text);
       if (!refs.length) continue;
+      if (!isPathScopedAggregateItem(text, refs, pathRefs)) continue;
+      seenText.add(textKey);
       items.push({
         source_commit: commit.short_sha,
         text: redact(text),
@@ -304,15 +342,16 @@ function releaseAggregateItems(commits) {
   return items;
 }
 
-function evidenceCommitsForRelease(commits, aggregateItems) {
+function evidenceCommitsForRelease(commits, aggregateItems, { revertedKeys = new Set() } = {}) {
   const synthetic = aggregateItems
     .filter((item) => !/^revert\b/i.test(String(item.text || "")))
+    .filter((item) => !isRevertedAggregateText(item.text, revertedKeys))
     .map((item) => {
       const prRefs = (item.source_refs || []).filter((ref) => String(ref).startsWith("#"));
       const sourceRefs = prRefs.length ? prRefs : [item.source_commit].filter(Boolean);
       return {
         sha: "",
-        short_sha: "",
+        short_sha: sourceRefs[0] || item.source_commit || "",
         subject: item.text,
         body_excerpt: "",
         source_refs: [...new Set(sourceRefs)],
@@ -320,7 +359,7 @@ function evidenceCommitsForRelease(commits, aggregateItems) {
       };
     });
   if (synthetic.length) return synthetic;
-  return commits.filter((commit) => !/^revert\b/i.test(String(commit.subject || "")));
+  return commits.filter((commit) => !/^revert\b/i.test(String(commit.subject || "")) && !isRevertedCommit(commit, revertedKeys));
 }
 
 function packageChanges(previousTag, currentRef) {
@@ -402,9 +441,9 @@ export function collectLocalPluginEvidence({ previousTag, currentTag, currentRef
     };
   });
 
-  const aggregateItems = releaseAggregateItems(commits);
   const revertedKeys = revertedCommitKeys(commits);
-  const evidenceCommits = evidenceCommitsForRelease(commits, aggregateItems);
+  const aggregateItems = releaseAggregateItems(commits, { revertedKeys });
+  const evidenceCommits = evidenceCommitsForRelease(commits, aggregateItems, { revertedKeys });
   const importantCommits = evidenceCommits.filter((commit) => isImportantCommit(commit, { revertedKeys }));
   return {
     product_id: PRODUCT_ID,
@@ -428,7 +467,7 @@ export function collectLocalPluginEvidence({ previousTag, currentTag, currentRef
       subject: commit.subject,
       accepted_refs: commitRefs(commit),
     })),
-    pull_requests: extractPullRequests(commits, aggregateItems, repo),
+    pull_requests: extractPullRequests(evidenceCommits, aggregateItems, repo),
     changed_files: changedFiles,
     diff_stat: {
       text: redact(tryGit(["diff", "--stat=200,200", range, "--", PRODUCT_PATH])),

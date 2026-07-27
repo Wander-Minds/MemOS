@@ -266,6 +266,105 @@ test("filters mixed MemOS release evidence down to local-plugin paths", () => {
   });
 });
 
+test("keeps release merge aggregate items tied to local-plugin path refs", () => {
+  withFixtureRepo(() => {
+    writeRepoFile("apps/memos-local-plugin/server/routes/metrics.ts", "export const viewerMetrics = 'stable';\n");
+    commitAll("fix: viewer dashboard drifts after namespace flip (#11)");
+
+    writeRepoFile("memos/core/session.js", "export const sessionCore = 'memory-provider-noise';\n");
+    commitAll("feat(memory): add workspace memory provider (#10)");
+
+    writeRepoFile("apps/memos-local-plugin/server/routes/metrics.ts", "export const viewerMetrics = 'release merge';\n");
+    git(["add", "."]);
+    git([
+      "commit",
+      "-q",
+      "-m",
+      "release: merge dev-v9.9.1 into main (#99)",
+      "-m",
+      "* fix: viewer dashboard drifts after namespace flip (#11)",
+      "-m",
+      "* feat(memory): add workspace memory provider (#10)",
+      "-m",
+      "* feat: plugin marketplace card polish (#12)",
+    ]);
+
+    const result = collectLocalPluginEvidence({
+      previousTag: "v9.9.0",
+      currentTag: "v9.9.1",
+      currentRef: "HEAD",
+      targetVersion: "9.9.1",
+      repo: "MemTensor/MemOS",
+    });
+
+    assert.deepEqual(
+      result.release_aggregate_items.map((item) => item.text),
+      ["fix: viewer dashboard drifts after namespace flip (#11)"],
+    );
+    assert.deepEqual(
+      result.commits.map((commit) => commit.subject),
+      ["fix: viewer dashboard drifts after namespace flip (#11)"],
+    );
+    assert.deepEqual(result.required_source_refs.map((item) => item.short_sha), ["#11"]);
+  });
+});
+
+test("drops reverted release merge aggregate items from local-plugin evidence", () => {
+  withFixtureRepo(() => {
+    writeRepoFile("apps/memos-local-plugin/src/reflection.js", "export const scoring = 'batch';\n");
+    commitAll("feat: chunk batch reflection scoring (#11)");
+    const featureSha = git(["rev-parse", "HEAD"]).trim();
+
+    writeRepoFile("apps/memos-local-plugin/src/reflection.js", "export const scoring = 'reverted';\n");
+    git(["add", "."]);
+    git([
+      "commit",
+      "-q",
+      "-m",
+      "Revert \"feat: chunk batch reflection scoring (#11)\" (#12)",
+      "-m",
+      `This reverts commit ${featureSha}.`,
+    ]);
+
+    writeRepoFile("apps/memos-local-plugin/server/routes/metrics.ts", "export const viewerMetrics = 'fixed';\n");
+    commitAll("fix: viewer dashboard drifts after namespace flip (#13)");
+
+    writeRepoFile("apps/memos-local-plugin/server/routes/metrics.ts", "export const viewerMetrics = 'release merge';\n");
+    git(["add", "."]);
+    git([
+      "commit",
+      "-q",
+      "-m",
+      "release: merge dev-v9.9.1 into main (#99)",
+      "-m",
+      "* feat: chunk batch reflection scoring (#11)",
+      "-m",
+      "* Revert \"feat: chunk batch reflection scoring (#11)\" (#12)",
+      "-m",
+      "* fix: viewer dashboard drifts after namespace flip (#13)",
+    ]);
+
+    const result = collectLocalPluginEvidence({
+      previousTag: "v9.9.0",
+      currentTag: "v9.9.1",
+      currentRef: "HEAD",
+      targetVersion: "9.9.1",
+      repo: "MemTensor/MemOS",
+    });
+
+    assert.deepEqual(
+      result.release_aggregate_items.map((item) => item.text),
+      ["fix: viewer dashboard drifts after namespace flip (#13)"],
+    );
+    assert.deepEqual(
+      result.commits.map((commit) => commit.subject),
+      ["fix: viewer dashboard drifts after namespace flip (#13)"],
+    );
+    assert.deepEqual(result.pull_requests.map((pr) => pr.number), ["13"]);
+    assert.ok(result.reverted_change_keys.includes("feat: chunk batch reflection scoring (#11)"));
+  });
+});
+
 test("fallback topic rewrites V7 session default fixes into user-facing docs copy", () => {
   const topic = fallbackTopicForText("fix(plugin): preserve V7 session defaults (#2158)", { allowGeneric: true });
   assert.equal(topic.category, "Fixed");
