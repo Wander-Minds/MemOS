@@ -597,6 +597,13 @@ const FALLBACK_TOPIC_RULES = [
     text_en: "**Session-boundary stability**: Added episode-storm safeguards and foreground-session fallbacks to reduce long-task stalls.",
   },
   {
+    pattern: /preserve v7 session defaults|v7-full-chain|default_config\.algorithm\.session|mergeMaxGapMs|followUpMode/i,
+    category: "Fixed",
+    text_cn: "**V7 会话默认配置**：保留默认 session 参数，避免自定义 follow-up 模式时丢失会话合并窗口。",
+    text_en:
+      "**V7 session defaults**: Preserved default session parameters so custom follow-up modes keep the merge window settings.",
+  },
+  {
     pattern: /captureRunner|reflectLlm|batch reflection|reflection scoring|chunk batch/i,
     category: "Improved",
     text_cn: "**采集反思稳定性**：优化批量反思评分与模型路由，降低长会话和 thinking 模型导致的解析风险。",
@@ -628,7 +635,7 @@ const FALLBACK_TOPIC_RULES = [
   },
 ];
 
-function fallbackTopicForText(text, { allowGeneric = false } = {}) {
+export function fallbackTopicForText(text, { allowGeneric = false } = {}) {
   const source = String(text || "");
   const rule = FALLBACK_TOPIC_RULES.find((item) => item.pattern.test(source));
   if (rule) return rule;

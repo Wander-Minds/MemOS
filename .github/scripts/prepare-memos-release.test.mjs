@@ -7,6 +7,7 @@ import {
   compareSemver,
   cleanVersion,
   docsPreviewMarkdown,
+  fallbackTopicForText,
   findPreviousMemOSTag,
   generateGitHubReleaseNotes,
   sourceRefsFromText,
@@ -139,6 +140,15 @@ test("release note methodology records the sources used for quality policy", () 
   assert.ok(RELEASE_NOTE_METHODS.some((item) => item.source === "keep-a-changelog"));
   assert.ok(RELEASE_NOTE_METHODS.some((item) => item.source === "conventional-commits"));
   assert.ok(RELEASE_NOTE_METHODS.every((item) => item.url.startsWith("https://")));
+});
+
+test("fallback topic rewrites V7 session default fixes into user-facing docs copy", () => {
+  const topic = fallbackTopicForText("fix(plugin): preserve V7 session defaults (#2158)", { allowGeneric: true });
+  assert.equal(topic.category, "Fixed");
+  assert.match(topic.text_cn, /V7 会话默认配置/);
+  assert.match(topic.text_cn, /会话合并窗口/);
+  assert.match(topic.text_en, /V7 session defaults/);
+  assert.doesNotMatch(topic.text_cn, /fix\(plugin\)/);
 });
 
 test("GitHub release notes fallback stays whole-repo when API access is unavailable", async () => {
