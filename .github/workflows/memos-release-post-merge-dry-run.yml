@@ -87,6 +87,9 @@ jobs:
           CURRENT_TAG: ${{ steps.prepare.outputs.current_tag }}
           PREVIOUS_TAG: ${{ steps.prepare.outputs.previous_tag }}
           HAS_PRODUCT_CHANGES: ${{ steps.prepare.outputs.has_product_changes }}
+          HAS_USER_FACING_PRODUCT_CHANGES: ${{ steps.prepare.outputs.has_user_facing_product_changes }}
+          DOCS_ACTION: ${{ steps.prepare.outputs.docs_action }}
+          SKIP_REASON: ${{ steps.prepare.outputs.skip_reason }}
           RELEASE_NOTES_SOURCE: ${{ steps.prepare.outputs.release_notes_source }}
         run: |
           {
@@ -98,6 +101,9 @@ jobs:
             echo "- previous_tag: ${PREVIOUS_TAG}"
             echo "- release_notes_source: ${RELEASE_NOTES_SOURCE}"
             echo "- local_plugin_changed: ${HAS_PRODUCT_CHANGES}"
+            echo "- local_plugin_user_facing_changed: ${HAS_USER_FACING_PRODUCT_CHANGES}"
+            echo "- docs_action: ${DOCS_ACTION}"
+            echo "- skip_reason: ${SKIP_REASON:-n/a}"
             echo ""
             echo "This post-merge check never creates tags, GitHub Releases, docs PRs, or deployments."
           } >> "${GITHUB_STEP_SUMMARY}"

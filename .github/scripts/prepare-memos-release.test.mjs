@@ -173,6 +173,15 @@ test("publish workflow defaults real releases to draft before release.published"
   assert.match(workflow, /Publish manually to trigger release\.published/);
 });
 
+test("legacy standalone local-plugin publisher requires an extra non-dry-run confirmation", () => {
+  const workflow = readFileSync(".github/workflows/memos-local-plugin-publish.yml", "utf8");
+  assert.match(workflow, /legacy_publish_confirmation:/);
+  assert.match(workflow, /guard-legacy-publish:/);
+  assert.match(workflow, /expected="LEGACY PUBLISH memos-local-plugin-v\$\{RELEASE_VERSION\}"/);
+  assert.match(workflow, /current official path is MemOS Release — Publish/);
+  assert.match(workflow, /needs: guard-legacy-publish/);
+});
+
 test("inspection artifact contract includes generic aliases and side-effect proof", () => {
   const script = readFileSync(".github/scripts/prepare-memos-release.mjs", "utf8");
   assert.match(script, /"release-notes\.md"/);
@@ -362,6 +371,42 @@ test("drops reverted release merge aggregate items from local-plugin evidence", 
     );
     assert.deepEqual(result.pull_requests.map((pr) => pr.number), ["13"]);
     assert.ok(result.reverted_change_keys.includes("feat: chunk batch reflection scoring (#11)"));
+  });
+});
+
+test("keeps a reapplied local-plugin change after an earlier commit was reverted", () => {
+  withFixtureRepo(() => {
+    writeRepoFile("apps/memos-local-plugin/src/reflection.js", "export const scoring = 'batch';\n");
+    commitAll("feat: chunk batch reflection scoring");
+    const featureSha = git(["rev-parse", "HEAD"]).trim();
+
+    git(["revert", "--no-edit", featureSha]);
+    git([
+      "commit",
+      "--amend",
+      "-q",
+      "-m",
+      "Revert \"feat: chunk batch reflection scoring\" (#12)",
+      "-m",
+      `This reverts commit ${featureSha}.`,
+    ]);
+
+    writeRepoFile("apps/memos-local-plugin/src/reflection.js", "export const scoring = 'reapplied';\n");
+    commitAll("feat: chunk batch reflection scoring");
+    const reappliedSha = git(["rev-parse", "--short", "HEAD"]).trim();
+
+    const result = collectLocalPluginEvidence({
+      previousTag: "v9.9.0",
+      currentTag: "v9.9.1",
+      currentRef: "HEAD",
+      targetVersion: "9.9.1",
+      repo: "MemTensor/MemOS",
+    });
+
+    assert.deepEqual(result.commits.map((commit) => commit.short_sha), [reappliedSha]);
+    assert.deepEqual(result.important_commits.map((commit) => commit.short_sha), [reappliedSha]);
+    assert.equal(result.has_user_facing_product_changes, true);
+    assert.equal(result.skip_reason, "");
   });
 });
 
@@ -574,6 +619,8 @@ test("allows an empty Plugin tab draft when a MemOS release has no local-plugin 
   const noChangeEvidence = {
     ...evidence,
     has_product_changes: false,
+    has_user_facing_product_changes: false,
+    skip_reason: "no local plugin path changes in apps/memos-local-plugin/**",
     commits: [],
     important_commits: [],
     required_source_refs: [],
@@ -585,9 +632,41 @@ test("allows an empty Plugin tab draft when a MemOS release has no local-plugin 
   assert.equal(validation.coverage.required_count, 0);
 
   const preview = buildDocsPreview(emptyDraft, noChangeEvidence);
+  assert.equal(preview.docs_action, "skip_plugin_tab_entry");
+  assert.equal(preview.skip_reason, "no local plugin path changes in apps/memos-local-plugin/**");
   assert.deepEqual(preview.cn.products.plugin, {});
   assert.deepEqual(preview.en.products.plugin, {});
   const markdown = docsPreviewMarkdown(preview, emptyDraft, noChangeEvidence);
-  assert.match(markdown, /No OpenClaw local plugin changes/);
+  assert.match(markdown, /no local plugin path changes/);
   assert.doesNotMatch(markdown, /Source Refs/);
+});
+
+test("skips Plugin tab docs when local-plugin changes are maintenance-only", () => {
+  withFixtureRepo(() => {
+    writeRepoFile("apps/memos-local-plugin/src/index.test.js", "export const coversSmokePath = true;\n");
+    commitAll("test(plugin): cover standalone bridge smoke path (#10)");
+
+    const result = collectLocalPluginEvidence({
+      previousTag: "v9.9.0",
+      currentTag: "v9.9.1",
+      currentRef: "HEAD",
+      targetVersion: "9.9.1",
+      repo: "MemTensor/MemOS",
+    });
+
+    assert.equal(result.has_product_changes, true);
+    assert.equal(result.has_user_facing_product_changes, false);
+    assert.match(result.skip_reason, /no user-facing/);
+    assert.deepEqual(result.important_commits, []);
+
+    const emptyDraft = { ok: true, needs_review: false, release_items: [] };
+    const validation = validateDraft(emptyDraft, result);
+    assert.equal(validation.ok, true);
+
+    const preview = buildDocsPreview(emptyDraft, result);
+    assert.equal(preview.docs_action, "skip_plugin_tab_entry");
+    assert.deepEqual(preview.cn.products.plugin, {});
+    assert.deepEqual(preview.en.products.plugin, {});
+    assert.match(docsPreviewMarkdown(preview, emptyDraft, result), /no user-facing/);
+  });
 });

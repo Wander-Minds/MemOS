@@ -254,12 +254,12 @@ function revertedCommitKeys(commits) {
   return keys;
 }
 
-function isRevertedCommit(commit, revertedKeys) {
+function isRevertedCommit(commit, revertedKeys, { matchSubject = false } = {}) {
   if (!revertedKeys?.size) return false;
   const subject = String(commit.subject || "").toLowerCase();
   return [...revertedKeys].some((key) => {
     const value = String(key).toLowerCase();
-    return commit.sha?.startsWith(value) || commit.short_sha?.startsWith(value) || subject === value;
+    return commit.sha?.startsWith(value) || commit.short_sha?.startsWith(value) || (matchSubject && subject === value);
   });
 }
 
@@ -305,7 +305,7 @@ function isPathScopedAggregateItem(text, refs, pathRefs) {
 
 function isRevertedAggregateText(text, revertedKeys) {
   if (/^revert\b/i.test(String(text || ""))) return true;
-  return isRevertedCommit({ subject: text }, revertedKeys);
+  return isRevertedCommit({ subject: text }, revertedKeys, { matchSubject: true });
 }
 
 function releaseAggregateItems(
@@ -360,6 +360,16 @@ function evidenceCommitsForRelease(commits, aggregateItems, { revertedKeys = new
     });
   if (synthetic.length) return synthetic;
   return commits.filter((commit) => !/^revert\b/i.test(String(commit.subject || "")) && !isRevertedCommit(commit, revertedKeys));
+}
+
+function localPluginSkipReason({ changedFiles = [], importantCommits = [] }) {
+  if (!changedFiles.length) {
+    return "no local plugin path changes in apps/memos-local-plugin/**";
+  }
+  if (!importantCommits.length) {
+    return "local plugin files changed, but no user-facing feature/fix/performance evidence was found";
+  }
+  return "";
 }
 
 function packageChanges(previousTag, currentRef) {
@@ -445,6 +455,7 @@ export function collectLocalPluginEvidence({ previousTag, currentTag, currentRef
   const aggregateItems = releaseAggregateItems(commits, { revertedKeys });
   const evidenceCommits = evidenceCommitsForRelease(commits, aggregateItems, { revertedKeys });
   const importantCommits = evidenceCommits.filter((commit) => isImportantCommit(commit, { revertedKeys }));
+  const skipReason = localPluginSkipReason({ changedFiles, importantCommits });
   return {
     product_id: PRODUCT_ID,
     product_title: PRODUCT_TITLE,
@@ -456,6 +467,8 @@ export function collectLocalPluginEvidence({ previousTag, currentTag, currentRef
     git_ref: currentRef,
     product_paths: PRODUCT_PATHS,
     has_product_changes: changedFiles.length > 0,
+    has_user_facing_product_changes: importantCommits.length > 0,
+    skip_reason: skipReason,
     commits: evidenceCommits,
     source_commits: commits,
     important_commits: importantCommits,
@@ -831,7 +844,7 @@ export function validateDraft(draft, evidence) {
 
   if (!draft.ok) issues.push({ kind: "draft_not_ok", message: "draft ok=false" });
   if (draft.needs_review) issues.push({ kind: "needs_review", message: "draft needs review" });
-  if (!draft.release_items.length && evidence.has_product_changes) {
+  if (!draft.release_items.length && evidence.has_user_facing_product_changes) {
     issues.push({ kind: "empty_release_items", message: "release_items is required when product files changed" });
   }
   if (draft.release_items.length > MAX_RELEASE_ITEMS) {
@@ -941,12 +954,12 @@ export function validateDraft(draft, evidence) {
 }
 
 async function requestDocAgentDraft(evidence) {
-  if (!evidence.has_product_changes) {
+  if (!evidence.has_user_facing_product_changes) {
     return {
       ok: true,
       needs_review: false,
       confidence: "high",
-      warnings: ["No OpenClaw local plugin path changes in this MemOS release range."],
+      warnings: [evidence.skip_reason || "No user-facing OpenClaw local plugin changes in this MemOS release range."],
       release_items: [],
       coverage: { required_count: 0, covered_required_count: 0, missing_required_count: 0 },
       validation_attempt_count: 1,
@@ -1050,6 +1063,10 @@ export function buildDocsPreview(draft, evidence) {
     previous_tag: evidence.previous_tag,
     current_tag: evidence.current_tag,
     product_paths: evidence.product_paths,
+    has_product_changes: evidence.has_product_changes,
+    has_user_facing_product_changes: evidence.has_user_facing_product_changes,
+    skip_reason: evidence.skip_reason,
+    docs_action: draft.release_items.length ? "preview_plugin_tab_entry" : "skip_plugin_tab_entry",
     would_create_docs_pr: false,
     files: ["content/cn/plugin-changelog.yml", "content/en/plugin-changelog.yml"],
     cn: makeSide("zh"),
@@ -1066,8 +1083,8 @@ export function docsPreviewMarkdown(preview, draft, evidence) {
     `- product_paths: ${evidence.product_paths.join(", ")}`,
     "",
   ];
-  if (!evidence.has_product_changes) {
-    lines.push("No OpenClaw local plugin changes were found in this MemOS release range.", "");
+  if (!draft.release_items.length) {
+    lines.push(evidence.skip_reason || "No OpenClaw local plugin docs entries were generated for this MemOS release range.", "");
     return lines.join("\n");
   }
   for (const [language, label, field] of [
@@ -1190,6 +1207,9 @@ export async function run() {
     target_sha: target.sha,
     product_paths: evidence.product_paths,
     has_product_changes: evidence.has_product_changes,
+    has_user_facing_product_changes: evidence.has_user_facing_product_changes,
+    skip_reason: evidence.skip_reason,
+    docs_action: preview.docs_action,
     changed_file_count: evidence.changed_files.length,
     commit_count: evidence.commits.length,
     important_commit_count: evidence.important_commits.length,
@@ -1226,6 +1246,9 @@ export async function run() {
       `- product_paths: ${evidence.product_paths.join(", ")}`,
       `- release_notes_source: ${releaseNotes.source}`,
       `- has_product_changes: ${evidence.has_product_changes}`,
+      `- has_user_facing_product_changes: ${evidence.has_user_facing_product_changes}`,
+      `- docs_action: ${preview.docs_action}`,
+      `- skip_reason: ${evidence.skip_reason || "n/a"}`,
       `- validation_attempt_count: ${draft.validation_attempt_count}`,
       `- repair_attempt_count: ${draft.repair_attempt_count}`,
       "- no_side_effects: npm_publish=false, oss_upload=false, production_docs_pr=false, pre_gray_production=false",
@@ -1260,6 +1283,9 @@ export async function run() {
   appendOutput("target_ref", target.ref);
   appendOutput("target_sha", target.sha);
   appendOutput("has_product_changes", String(evidence.has_product_changes));
+  appendOutput("has_user_facing_product_changes", String(evidence.has_user_facing_product_changes));
+  appendOutput("docs_action", preview.docs_action);
+  appendOutput("skip_reason", evidence.skip_reason || "");
   appendOutput("release_notes_source", releaseNotes.source);
   appendOutput("validation_attempt_count", String(draft.validation_attempt_count ?? ""));
   appendOutput("repair_attempt_count", String(draft.repair_attempt_count ?? ""));

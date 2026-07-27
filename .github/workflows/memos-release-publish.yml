@@ -88,6 +88,9 @@ jobs:
           TARGET_REF: ${{ steps.prepare.outputs.target_ref }}
           TARGET_SHA: ${{ steps.prepare.outputs.target_sha }}
           HAS_PRODUCT_CHANGES: ${{ steps.prepare.outputs.has_product_changes }}
+          HAS_USER_FACING_PRODUCT_CHANGES: ${{ steps.prepare.outputs.has_user_facing_product_changes }}
+          DOCS_ACTION: ${{ steps.prepare.outputs.docs_action }}
+          SKIP_REASON: ${{ steps.prepare.outputs.skip_reason }}
           RELEASE_NOTES_SOURCE: ${{ steps.prepare.outputs.release_notes_source }}
           VALIDATION_ATTEMPT_COUNT: ${{ steps.prepare.outputs.validation_attempt_count }}
           REPAIR_ATTEMPT_COUNT: ${{ steps.prepare.outputs.repair_attempt_count }}
@@ -102,6 +105,9 @@ jobs:
             echo "- target_sha: ${TARGET_SHA}"
             echo "- release_notes_source: ${RELEASE_NOTES_SOURCE}"
             echo "- local_plugin_changed: ${HAS_PRODUCT_CHANGES}"
+            echo "- local_plugin_user_facing_changed: ${HAS_USER_FACING_PRODUCT_CHANGES}"
+            echo "- docs_action: ${DOCS_ACTION}"
+            echo "- skip_reason: ${SKIP_REASON:-n/a}"
             echo "- validation_attempt_count: ${VALIDATION_ATTEMPT_COUNT}"
             echo "- repair_attempt_count: ${REPAIR_ATTEMPT_COUNT}"
             echo ""
