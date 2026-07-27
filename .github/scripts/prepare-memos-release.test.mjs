@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import test from "node:test";
 
 import {
@@ -119,6 +120,15 @@ test("requires an exact publish confirmation for non-dry-run releases", () => {
   assert.doesNotThrow(() =>
     validatePublishConfirmation({ dryRun: "false", version: "2.0.25", confirmation: "PUBLISH v2.0.25" }),
   );
+});
+
+test("publish workflow defaults real releases to draft before release.published", () => {
+  const workflow = readFileSync(".github/workflows/memos-release-publish.yml", "utf8");
+  assert.match(workflow, /create_draft_release:/);
+  assert.match(workflow, /default:\s+true/);
+  assert.match(workflow, /CREATE_DRAFT_RELEASE/);
+  assert.match(workflow, /flags\+=\(--draft\)/);
+  assert.match(workflow, /Publish manually to trigger release\.published/);
 });
 
 test("allows flexible target refs only for dry runs", () => {

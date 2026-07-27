@@ -15,6 +15,11 @@ on:
         required: true
         type: boolean
         default: true
+      create_draft_release:
+        description: "When dry_run=false, create a Draft GitHub Release first. Publish manually to trigger release.published."
+        required: true
+        type: boolean
+        default: true
       publish_confirmation:
         description: "Required only when dry_run=false. Must exactly equal: PUBLISH v<version>"
         required: false
@@ -115,6 +120,7 @@ jobs:
           CURRENT_TAG: ${{ steps.prepare.outputs.current_tag }}
           TARGET_SHA: ${{ steps.prepare.outputs.target_sha }}
           RELEASE_NOTES_FILE: ${{ steps.prepare.outputs.release_notes_file }}
+          CREATE_DRAFT_RELEASE: ${{ inputs.create_draft_release }}
         run: |
           set -euo pipefail
 
@@ -145,15 +151,20 @@ jobs:
                 --jq '[.isDraft, .url] | @tsv'
             )"
             IFS=$'\t' read -r is_draft release_url <<< "${release_info}"
-            if [ "${is_draft}" = "true" ]; then
+            if [ "${is_draft}" = "true" ] && [ "${CREATE_DRAFT_RELEASE}" != "true" ]; then
               echo "::error::GitHub Release ${CURRENT_TAG} already exists as draft (${release_url}); publish or delete it manually before rerunning."
               exit 1
             fi
-            echo "::notice::GitHub Release ${CURRENT_TAG} already exists and is published; leaving it unchanged."
+            echo "::notice::GitHub Release ${CURRENT_TAG} already exists (${release_url}); leaving it unchanged."
           else
+            flags=()
+            if [ "${CREATE_DRAFT_RELEASE}" = "true" ]; then
+              flags+=(--draft)
+            fi
             gh release create "${CURRENT_TAG}" \
               --repo "${GITHUB_REPOSITORY}" \
               --target "${TARGET_SHA}" \
               --title "Release ${CURRENT_TAG}" \
-              --notes-file "${RELEASE_NOTES_FILE}"
+              --notes-file "${RELEASE_NOTES_FILE}" \
+              "${flags[@]}"
           fi
