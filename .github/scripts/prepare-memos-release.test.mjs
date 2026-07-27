@@ -1,11 +1,15 @@
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
+import { execFileSync } from "node:child_process";
+import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { dirname, join } from "node:path";
 import test from "node:test";
 
 import {
   PRODUCT_ID,
   RELEASE_NOTE_METHODS,
   buildDocsPreview,
+  collectLocalPluginEvidence,
   compareSemver,
   cleanVersion,
   docsPreviewMarkdown,
@@ -79,6 +83,43 @@ const validDraft = {
     },
   ],
 };
+
+function git(args) {
+  return execFileSync("git", args, { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] });
+}
+
+function writeRepoFile(path, contents) {
+  mkdirSync(dirname(path), { recursive: true });
+  writeFileSync(path, contents, "utf8");
+}
+
+function commitAll(message) {
+  git(["add", "."]);
+  git(["commit", "-q", "-m", message]);
+}
+
+function withFixtureRepo(fn) {
+  const originalCwd = process.cwd();
+  const root = mkdtempSync(join(tmpdir(), "memos-release-evidence-"));
+  try {
+    process.chdir(root);
+    git(["init", "-q"]);
+    git(["config", "user.email", "release-test@example.invalid"]);
+    git(["config", "user.name", "Release Test"]);
+    writeRepoFile(
+      "apps/memos-local-plugin/package.json",
+      `${JSON.stringify({ name: "@memtensor/memos-local-plugin", version: "9.9.0" }, null, 2)}\n`,
+    );
+    writeRepoFile("apps/memos-local-plugin/src/index.js", "export const baseline = true;\n");
+    writeRepoFile("memos/core/session.js", "export const sessionCore = true;\n");
+    writeRepoFile("packages/memos-sdk/index.js", "export const sdk = true;\n");
+    commitAll("chore: baseline release");
+    git(["tag", "v9.9.0"]);
+    return fn(root);
+  } finally {
+    process.chdir(originalCwd);
+  }
+}
 
 test("compares prerelease versions with SemVer precedence", () => {
   assert.ok(compareSemver("1.0.0-beta.10", "1.0.0-beta.9") > 0);
@@ -166,7 +207,63 @@ test("release note methodology records the sources used for quality policy", () 
   assert.ok(RELEASE_NOTE_METHODS.some((item) => item.source === "github-auto-generated-release-notes"));
   assert.ok(RELEASE_NOTE_METHODS.some((item) => item.source === "keep-a-changelog"));
   assert.ok(RELEASE_NOTE_METHODS.some((item) => item.source === "conventional-commits"));
+  assert.ok(RELEASE_NOTE_METHODS.some((item) => item.source === "release-please"));
   assert.ok(RELEASE_NOTE_METHODS.every((item) => item.url.startsWith("https://")));
+});
+
+test("collects no local-plugin evidence from non-plugin-only release noise", () => {
+  withFixtureRepo(() => {
+    writeRepoFile("memos/core/session.js", "export const sessionCore = 'telemetry-only';\n");
+    commitAll("feat: add core session telemetry (#10)");
+
+    const result = collectLocalPluginEvidence({
+      previousTag: "v9.9.0",
+      currentTag: "v9.9.1",
+      currentRef: "HEAD",
+      targetVersion: "9.9.1",
+      repo: "MemTensor/MemOS",
+    });
+
+    assert.equal(result.has_product_changes, false);
+    assert.deepEqual(result.changed_files, []);
+    assert.deepEqual(result.commits, []);
+    assert.deepEqual(result.important_commits, []);
+    assert.deepEqual(result.required_source_refs, []);
+    assert.deepEqual(result.product_paths, ["apps/memos-local-plugin/**"]);
+  });
+});
+
+test("filters mixed MemOS release evidence down to local-plugin paths", () => {
+  withFixtureRepo(() => {
+    writeRepoFile("memos/core/session.js", "export const sessionCore = 'telemetry-only';\n");
+    commitAll("feat: add core session telemetry (#10)");
+
+    writeRepoFile("apps/memos-local-plugin/src/provider-routing.js", "export const providerRouting = true;\n");
+    writeRepoFile("packages/memos-sdk/index.js", "export const sdk = 'noise in the same release range';\n");
+    commitAll("feat(plugin): add provider config routing (#11)");
+
+    const result = collectLocalPluginEvidence({
+      previousTag: "v9.9.0",
+      currentTag: "v9.9.1",
+      currentRef: "HEAD",
+      targetVersion: "9.9.1",
+      repo: "MemTensor/MemOS",
+    });
+
+    assert.equal(result.has_product_changes, true);
+    assert.deepEqual(
+      result.changed_files.map((item) => item.path),
+      ["apps/memos-local-plugin/src/provider-routing.js"],
+    );
+    assert.deepEqual(
+      result.commits.map((commit) => commit.subject),
+      ["feat(plugin): add provider config routing (#11)"],
+    );
+    assert.deepEqual(result.pull_requests.map((pr) => pr.number), ["11"]);
+    assert.equal(result.required_source_refs.length, 1);
+    assert.ok(result.required_source_refs[0].accepted_refs.includes("#11"));
+    assert.ok(result.important_diff["apps/memos-local-plugin/**"][0].path.endsWith("provider-routing.js"));
+  });
 });
 
 test("fallback topic rewrites V7 session default fixes into user-facing docs copy", () => {
@@ -372,4 +469,26 @@ test("builds Plugin tab previews without exposing source refs in page content", 
   assert.match(markdown, /Source Refs/);
   assert.match(markdown, /9deb941e/);
   assert.match(markdown, /59c14746/);
+});
+
+test("allows an empty Plugin tab draft when a MemOS release has no local-plugin changes", () => {
+  const noChangeEvidence = {
+    ...evidence,
+    has_product_changes: false,
+    commits: [],
+    important_commits: [],
+    required_source_refs: [],
+    changed_files: [],
+  };
+  const emptyDraft = { ok: true, needs_review: false, release_items: [] };
+  const validation = validateDraft(emptyDraft, noChangeEvidence);
+  assert.equal(validation.ok, true);
+  assert.equal(validation.coverage.required_count, 0);
+
+  const preview = buildDocsPreview(emptyDraft, noChangeEvidence);
+  assert.deepEqual(preview.cn.products.plugin, {});
+  assert.deepEqual(preview.en.products.plugin, {});
+  const markdown = docsPreviewMarkdown(preview, emptyDraft, noChangeEvidence);
+  assert.match(markdown, /No OpenClaw local plugin changes/);
+  assert.doesNotMatch(markdown, /Source Refs/);
 });
