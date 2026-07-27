@@ -1,0 +1,159 @@
+name: MemOS Release — Publish
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "MemOS version to release, without leading v (for example 2.0.25)"
+        required: true
+      target_ref:
+        description: "Git ref to release from. Use main for normal releases."
+        required: false
+        default: "main"
+      dry_run:
+        description: "Preview only. Skip tag creation, GitHub Release, docs PR, and deployment."
+        required: true
+        type: boolean
+        default: true
+      publish_confirmation:
+        description: "Required only when dry_run=false. Must exactly equal: PUBLISH v<version>"
+        required: false
+        default: ""
+
+concurrency:
+  group: memos-release-publish
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    if: ${{ github.repository == 'MemTensor/MemOS' }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.ref }}
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Fetch release refs
+        shell: bash
+        run: |
+          set -euo pipefail
+          git fetch --tags --force origin
+          git fetch origin '+refs/heads/*:refs/remotes/origin/*'
+
+      - name: Run release workflow tests
+        shell: bash
+        run: node --test .github/scripts/prepare-memos-release.test.mjs
+
+      - name: Prepare MemOS release inspection
+        id: prepare
+        shell: bash
+        env:
+          RELEASE_VERSION: ${{ inputs.version }}
+          TARGET_REF: ${{ inputs.target_ref || 'main' }}
+          DRY_RUN: ${{ inputs.dry_run }}
+          PUBLISH_CONFIRMATION: ${{ inputs.publish_confirmation }}
+          GITHUB_TOKEN: ${{ github.token }}
+          DOC_AGENT_RELEASE_NOTES_DRAFT_URL: ${{ secrets.DOC_AGENT_RELEASE_NOTES_DRAFT_URL }}
+          DOC_AGENT_RELEASE_NOTES_DRAFT_TOKEN: ${{ secrets.DOC_AGENT_RELEASE_NOTES_DRAFT_TOKEN }}
+        run: |
+          bash .github/scripts/retry.sh --attempts 2 --label "prepare MemOS release inspection" -- \
+            node .github/scripts/prepare-memos-release.mjs
+
+      - name: Upload release inspection
+        uses: actions/upload-artifact@v4
+        with:
+          name: memos-release-inspection
+          path: ${{ steps.prepare.outputs.inspection_dir }}
+          if-no-files-found: error
+
+      - name: Summarize dry-run inspection
+        shell: bash
+        env:
+          CURRENT_TAG: ${{ steps.prepare.outputs.current_tag }}
+          PREVIOUS_TAG: ${{ steps.prepare.outputs.previous_tag }}
+          TARGET_REF: ${{ steps.prepare.outputs.target_ref }}
+          TARGET_SHA: ${{ steps.prepare.outputs.target_sha }}
+          HAS_PRODUCT_CHANGES: ${{ steps.prepare.outputs.has_product_changes }}
+          RELEASE_NOTES_SOURCE: ${{ steps.prepare.outputs.release_notes_source }}
+          VALIDATION_ATTEMPT_COUNT: ${{ steps.prepare.outputs.validation_attempt_count }}
+          REPAIR_ATTEMPT_COUNT: ${{ steps.prepare.outputs.repair_attempt_count }}
+        run: |
+          {
+            echo "## MemOS release inspection"
+            echo ""
+            echo "- current_tag: ${CURRENT_TAG}"
+            echo "- previous_tag: ${PREVIOUS_TAG}"
+            echo "- target_ref: ${TARGET_REF}"
+            echo "- target_sha: ${TARGET_SHA}"
+            echo "- release_notes_source: ${RELEASE_NOTES_SOURCE}"
+            echo "- local_plugin_changed: ${HAS_PRODUCT_CHANGES}"
+            echo "- validation_attempt_count: ${VALIDATION_ATTEMPT_COUNT}"
+            echo "- repair_attempt_count: ${REPAIR_ATTEMPT_COUNT}"
+            echo ""
+            echo "The uploaded artifact contains the public MemOS release notes preview and the OpenClaw local plugin docs preview."
+          } >> "${GITHUB_STEP_SUMMARY}"
+
+      - name: Stop after dry run
+        if: ${{ inputs.dry_run }}
+        shell: bash
+        run: |
+          echo "::notice::dry_run=true; skipped tag creation and GitHub Release."
+
+      - name: Create tag and GitHub Release
+        if: ${{ !inputs.dry_run }}
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          CURRENT_TAG: ${{ steps.prepare.outputs.current_tag }}
+          TARGET_SHA: ${{ steps.prepare.outputs.target_sha }}
+          RELEASE_NOTES_FILE: ${{ steps.prepare.outputs.release_notes_file }}
+        run: |
+          set -euo pipefail
+
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+          remote_tag_sha="$(
+            git ls-remote --tags origin "refs/tags/${CURRENT_TAG}" "refs/tags/${CURRENT_TAG}^{}" |
+              awk '$2 ~ /\^\{\}$/ {sha=$1} $2 !~ /\^\{\}$/ && sha=="" {sha=$1} END {print sha}'
+          )"
+
+          if [ -n "${remote_tag_sha}" ]; then
+            if [ "${remote_tag_sha}" != "${TARGET_SHA}" ]; then
+              echo "::error::Remote tag ${CURRENT_TAG} already exists at ${remote_tag_sha}, expected ${TARGET_SHA}."
+              exit 1
+            fi
+            echo "::notice::Remote tag ${CURRENT_TAG} already exists at ${TARGET_SHA}; leaving it unchanged."
+          else
+            git tag "${CURRENT_TAG}" "${TARGET_SHA}"
+            git push origin "refs/tags/${CURRENT_TAG}"
+          fi
+
+          if gh release view "${CURRENT_TAG}" --repo "${GITHUB_REPOSITORY}" >/dev/null 2>&1; then
+            release_info="$(
+              gh release view "${CURRENT_TAG}" \
+                --repo "${GITHUB_REPOSITORY}" \
+                --json isDraft,url \
+                --jq '[.isDraft, .url] | @tsv'
+            )"
+            IFS=$'\t' read -r is_draft release_url <<< "${release_info}"
+            if [ "${is_draft}" = "true" ]; then
+              echo "::error::GitHub Release ${CURRENT_TAG} already exists as draft (${release_url}); publish or delete it manually before rerunning."
+              exit 1
+            fi
+            echo "::notice::GitHub Release ${CURRENT_TAG} already exists and is published; leaving it unchanged."
+          else
+            gh release create "${CURRENT_TAG}" \
+              --repo "${GITHUB_REPOSITORY}" \
+              --target "${TARGET_SHA}" \
+              --title "Release ${CURRENT_TAG}" \
+              --notes-file "${RELEASE_NOTES_FILE}"
+          fi
