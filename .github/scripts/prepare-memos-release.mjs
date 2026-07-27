@@ -1041,35 +1041,58 @@ export async function run() {
   mkdirSync(outputRoot, { recursive: true });
 
   const releaseNotesFile = join(outputRoot, "memos-release-notes.md");
+  const releaseNotesAliasFile = join(outputRoot, "release-notes.md");
   const evidenceFile = join(outputRoot, "local-plugin-evidence.json");
+  const evidenceAliasFile = join(outputRoot, "evidence.json");
   const draftFile = join(outputRoot, "local-plugin-docs-draft.json");
   const docsPreviewFile = join(outputRoot, "local-plugin-docs-preview.json");
+  const docsPreviewAliasFile = join(outputRoot, "docs-preview.json");
   const docsPreviewMarkdownFile = join(outputRoot, "local-plugin-docs-preview.md");
+  const docsPreviewMarkdownAliasFile = join(outputRoot, "docs-preview.md");
   const qualityReportFile = join(outputRoot, "quality-report.json");
   const readmeFile = join(outputRoot, "README.md");
 
   writeFileSync(releaseNotesFile, `${releaseNotes.body.trim()}\n`, "utf8");
-  writeJson(evidenceFile, JSON.parse(redact(JSON.stringify(evidence, null, 2))));
+  writeFileSync(releaseNotesAliasFile, `${releaseNotes.body.trim()}\n`, "utf8");
+  const redactedEvidence = JSON.parse(redact(JSON.stringify(evidence, null, 2)));
+  writeJson(evidenceFile, redactedEvidence);
+  writeJson(evidenceAliasFile, redactedEvidence);
   writeJson(draftFile, draft);
   writeJson(docsPreviewFile, preview);
+  writeJson(docsPreviewAliasFile, preview);
   writeFileSync(docsPreviewMarkdownFile, docsPreviewMarkdown(preview, draft, evidence), "utf8");
+  writeFileSync(docsPreviewMarkdownAliasFile, docsPreviewMarkdown(preview, draft, evidence), "utf8");
   const qualityReport = {
     ok: validation.ok,
+    source_id: PRODUCT_ID,
+    release_kind: "memos_whole_repo",
+    docs_product_extraction: "path_filtered",
+    public_release_body: "github_generated_whats_changed",
     dry_run: dryRun === "true",
     release_notes_source: releaseNotes.source,
     current_tag: currentTag,
     previous_tag: previousTag,
     target_ref: target.ref,
     target_sha: target.sha,
+    product_paths: evidence.product_paths,
     has_product_changes: evidence.has_product_changes,
     changed_file_count: evidence.changed_files.length,
     commit_count: evidence.commits.length,
     important_commit_count: evidence.important_commits.length,
+    release_item_count: draft.release_items.length,
     release_note_methodology: RELEASE_NOTE_METHODS,
     coverage: validation.coverage,
+    validation_report: validation,
     validation_attempt_count: draft.validation_attempt_count,
     repair_attempt_count: draft.repair_attempt_count,
     warnings: draft.warnings,
+    docs_preview_files: ["content/cn/plugin-changelog.yml", "content/en/plugin-changelog.yml"],
+    no_side_effects: {
+      npm_publish: false,
+      oss_upload: false,
+      production_docs_pr: false,
+      pre_gray_production: false,
+    },
   };
   writeJson(qualityReportFile, qualityReport);
   writeFileSync(
@@ -1077,23 +1100,33 @@ export async function run() {
     [
       "# MemOS release inspection",
       "",
+      `- source_id: ${PRODUCT_ID}`,
+      "- release_kind: memos_whole_repo",
+      "- docs_product_extraction: path_filtered",
+      "- public_release_body: github_generated_whats_changed",
       `- dry_run: ${dryRun}`,
       `- current_tag: ${currentTag}`,
       `- previous_tag: ${previousTag}`,
       `- target_ref: ${target.ref}`,
       `- target_sha: ${target.sha}`,
+      `- product_paths: ${evidence.product_paths.join(", ")}`,
       `- release_notes_source: ${releaseNotes.source}`,
       `- has_product_changes: ${evidence.has_product_changes}`,
       `- validation_attempt_count: ${draft.validation_attempt_count}`,
       `- repair_attempt_count: ${draft.repair_attempt_count}`,
+      "- no_side_effects: npm_publish=false, oss_upload=false, production_docs_pr=false, pre_gray_production=false",
       "",
       "Files:",
       "",
       "- memos-release-notes.md",
+      "- release-notes.md",
       "- local-plugin-evidence.json",
+      "- evidence.json",
       "- local-plugin-docs-draft.json",
       "- local-plugin-docs-preview.md",
       "- local-plugin-docs-preview.json",
+      "- docs-preview.md",
+      "- docs-preview.json",
       "- quality-report.json",
       "",
     ].join("\n"),
@@ -1101,10 +1134,13 @@ export async function run() {
   );
 
   appendOutput("inspection_dir", outputRoot);
+  appendOutput("memos_release_notes_file", releaseNotesFile);
   appendOutput("release_notes_file", releaseNotesFile);
+  appendOutput("evidence_file", evidenceFile);
   appendOutput("docs_preview_file", docsPreviewFile);
   appendOutput("docs_preview_markdown_file", docsPreviewMarkdownFile);
   appendOutput("quality_report_file", qualityReportFile);
+  appendOutput("source_id", PRODUCT_ID);
   appendOutput("previous_tag", previousTag);
   appendOutput("current_tag", currentTag);
   appendOutput("target_ref", target.ref);

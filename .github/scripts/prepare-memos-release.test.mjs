@@ -3,6 +3,7 @@ import { readFileSync } from "node:fs";
 import test from "node:test";
 
 import {
+  PRODUCT_ID,
   RELEASE_NOTE_METHODS,
   buildDocsPreview,
   compareSemver,
@@ -129,6 +130,22 @@ test("publish workflow defaults real releases to draft before release.published"
   assert.match(workflow, /CREATE_DRAFT_RELEASE/);
   assert.match(workflow, /flags\+=\(--draft\)/);
   assert.match(workflow, /Publish manually to trigger release\.published/);
+});
+
+test("inspection artifact contract includes generic aliases and side-effect proof", () => {
+  const script = readFileSync(".github/scripts/prepare-memos-release.mjs", "utf8");
+  assert.match(script, /"release-notes\.md"/);
+  assert.match(script, /"evidence\.json"/);
+  assert.match(script, /"docs-preview\.md"/);
+  assert.match(script, /"docs-preview\.json"/);
+  assert.match(script, /source_id:\s+PRODUCT_ID/);
+  assert.match(script, /release_kind:\s+"memos_whole_repo"/);
+  assert.match(script, /docs_product_extraction:\s+"path_filtered"/);
+  assert.match(script, /public_release_body:\s+"github_generated_whats_changed"/);
+  assert.match(script, /no_side_effects:\s+\{/);
+  assert.match(script, /npm_publish:\s+false/);
+  assert.match(script, /production_docs_pr:\s+false/);
+  assert.equal(PRODUCT_ID, "openclaw-local-plugin");
 });
 
 test("allows flexible target refs only for dry runs", () => {

@@ -84,6 +84,7 @@ jobs:
         env:
           CURRENT_TAG: ${{ steps.prepare.outputs.current_tag }}
           PREVIOUS_TAG: ${{ steps.prepare.outputs.previous_tag }}
+          SOURCE_ID: ${{ steps.prepare.outputs.source_id }}
           TARGET_REF: ${{ steps.prepare.outputs.target_ref }}
           TARGET_SHA: ${{ steps.prepare.outputs.target_sha }}
           HAS_PRODUCT_CHANGES: ${{ steps.prepare.outputs.has_product_changes }}
@@ -94,6 +95,7 @@ jobs:
           {
             echo "## MemOS release inspection"
             echo ""
+            echo "- source_id: ${SOURCE_ID}"
             echo "- current_tag: ${CURRENT_TAG}"
             echo "- previous_tag: ${PREVIOUS_TAG}"
             echo "- target_ref: ${TARGET_REF}"
