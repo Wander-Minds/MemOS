@@ -1,4 +1,4 @@
-name: MemOS Local Plugin (V2) — Build & Publish
+name: MemOS Local Plugin (V2) — Legacy Standalone Publisher
 
 on:
   workflow_dispatch:
