@@ -480,9 +480,7 @@ function localPluginPackageVersions(previousTag, currentRef) {
 }
 
 export function validateLocalPluginVersionPlan(evidence, expectedVersionInput = "") {
-  const expectedVersion = String(expectedVersionInput || "").trim()
-    ? cleanLocalPluginVersion(expectedVersionInput, "local_plugin_version input")
-    : "";
+  const expectedVersionRaw = String(expectedVersionInput || "").trim();
   const previousReleasedVersion = cleanLocalPluginVersion(
     evidence.local_plugin_previous_version_raw || evidence.local_plugin_package_previous_version_raw,
     "previous released OpenClaw local plugin version",
@@ -503,16 +501,31 @@ export function validateLocalPluginVersionPlan(evidence, expectedVersionInput = 
     );
   }
 
-  let resolvedVersion = currentPackageVersion;
-  let versionSource = `${PRODUCT_PATH}/package.json`;
+  const hasProductChanges = Boolean(evidence.has_product_changes);
+  const hasUserFacingChanges = Boolean(evidence.has_user_facing_product_changes);
+  let expectedVersion = "";
+  let resolvedVersion = previousReleasedVersion;
+  let versionSource = hasProductChanges ? "no_user_facing_product_changes" : "no_product_path_changes";
   let autoIncremented = false;
-  if (evidence.has_user_facing_product_changes && packageVsReleasedOrder <= 0) {
-    resolvedVersion = incrementPatchVersion(previousReleasedVersion);
-    versionSource = "auto_patch_from_previous_released_version";
-    autoIncremented = true;
-  } else if (!evidence.has_user_facing_product_changes && packageVsReleasedOrder <= 0) {
-    resolvedVersion = previousReleasedVersion;
-    versionSource = "unchanged_no_user_facing_changes";
+  let inputIgnored = false;
+  let inputIgnoredReason = "";
+
+  if (hasUserFacingChanges) {
+    expectedVersion = expectedVersionRaw
+      ? cleanLocalPluginVersion(expectedVersionRaw, "local_plugin_version input")
+      : "";
+    resolvedVersion = currentPackageVersion;
+    versionSource = `${PRODUCT_PATH}/package.json`;
+    if (packageVsReleasedOrder <= 0) {
+      resolvedVersion = incrementPatchVersion(previousReleasedVersion);
+      versionSource = "auto_patch_from_previous_released_version";
+      autoIncremented = true;
+    }
+  } else if (expectedVersionRaw) {
+    inputIgnored = true;
+    inputIgnoredReason = hasProductChanges
+      ? "local plugin path changed, but no user-facing feature/fix/performance evidence was found"
+      : "no local plugin path changes in apps/memos-local-plugin/**";
   }
 
   if (expectedVersion && expectedVersion !== resolvedVersion) {
@@ -529,6 +542,9 @@ export function validateLocalPluginVersionPlan(evidence, expectedVersionInput = 
     version_required: Boolean(evidence.has_user_facing_product_changes),
     version_source: versionSource,
     auto_incremented: autoIncremented,
+    input_ignored: inputIgnored,
+    input_ignored_reason: inputIgnoredReason,
+    input_raw: expectedVersionRaw,
     package_previous_version: displayVersion(previousPackageVersion),
     package_version: displayVersion(currentPackageVersion),
     package_version_changed: previousPackageVersion !== currentPackageVersion,
@@ -1215,6 +1231,8 @@ export function buildDocsPreview(draft, evidence) {
         local_plugin_previous_version: evidence.local_plugin_previous_version,
         local_plugin_version_source: evidence.local_plugin_version_source,
         local_plugin_version_auto_incremented: evidence.local_plugin_version_auto_incremented,
+        local_plugin_version_input_ignored: evidence.local_plugin_version_input_ignored,
+        local_plugin_version_input_ignored_reason: evidence.local_plugin_version_input_ignored_reason,
         local_plugin_package_version: evidence.local_plugin_package_version,
         local_plugin_package_previous_version: evidence.local_plugin_package_previous_version,
         product_paths: evidence.product_paths,
@@ -1236,6 +1254,8 @@ export function buildDocsPreview(draft, evidence) {
     local_plugin_version_changed: evidence.local_plugin_version_changed,
     local_plugin_version_source: evidence.local_plugin_version_source,
     local_plugin_version_auto_incremented: evidence.local_plugin_version_auto_incremented,
+    local_plugin_version_input_ignored: evidence.local_plugin_version_input_ignored,
+    local_plugin_version_input_ignored_reason: evidence.local_plugin_version_input_ignored_reason,
     local_plugin_package_version: evidence.local_plugin_package_version,
     local_plugin_package_previous_version: evidence.local_plugin_package_previous_version,
     product_paths: evidence.product_paths,
@@ -1260,6 +1280,8 @@ export function docsPreviewMarkdown(preview, draft, evidence) {
     `- local_plugin_previous_version: ${evidence.local_plugin_previous_version || "n/a"}`,
     `- local_plugin_version_source: ${evidence.local_plugin_version_source || `${PRODUCT_PATH}/package.json`}`,
     `- local_plugin_version_auto_incremented: ${Boolean(evidence.local_plugin_version_auto_incremented)}`,
+    `- local_plugin_version_input_ignored: ${Boolean(evidence.local_plugin_version_input_ignored)}`,
+    `- local_plugin_version_input_ignored_reason: ${evidence.local_plugin_version_input_ignored_reason || "n/a"}`,
     `- local_plugin_package_version: ${evidence.local_plugin_package_version || "n/a"}`,
     `- local_plugin_package_previous_version: ${evidence.local_plugin_package_previous_version || "n/a"}`,
     `- product_paths: ${evidence.product_paths.join(", ")}`,
@@ -1355,6 +1377,9 @@ export async function run() {
   evidence.local_plugin_version_changed = localPluginVersionPlan.version_changed;
   evidence.local_plugin_version_source = localPluginVersionPlan.version_source;
   evidence.local_plugin_version_auto_incremented = localPluginVersionPlan.auto_incremented;
+  evidence.local_plugin_version_input_ignored = localPluginVersionPlan.input_ignored;
+  evidence.local_plugin_version_input_ignored_reason = localPluginVersionPlan.input_ignored_reason;
+  evidence.local_plugin_version_input_raw = localPluginVersionPlan.input_raw;
   evidence.local_plugin_package_previous_version = localPluginVersionPlan.package_previous_version;
   evidence.local_plugin_package_previous_version_raw = localPluginVersionPlan.package_previous_version.replace(/^v/, "");
   evidence.local_plugin_package_version = localPluginVersionPlan.package_version;
@@ -1416,6 +1441,8 @@ export async function run() {
     local_plugin_version_required: localPluginVersionPlan.version_required,
     local_plugin_version_source: evidence.local_plugin_version_source,
     local_plugin_version_auto_incremented: evidence.local_plugin_version_auto_incremented,
+    local_plugin_version_input_ignored: evidence.local_plugin_version_input_ignored,
+    local_plugin_version_input_ignored_reason: evidence.local_plugin_version_input_ignored_reason,
     local_plugin_expected_version: localPluginVersionPlan.expected_version,
     local_plugin_package_version: evidence.local_plugin_package_version,
     local_plugin_package_previous_version: evidence.local_plugin_package_previous_version,
@@ -1466,6 +1493,8 @@ export async function run() {
       `- local_plugin_version_required: ${localPluginVersionPlan.version_required}`,
       `- local_plugin_version_source: ${evidence.local_plugin_version_source}`,
       `- local_plugin_version_auto_incremented: ${evidence.local_plugin_version_auto_incremented}`,
+      `- local_plugin_version_input_ignored: ${evidence.local_plugin_version_input_ignored}`,
+      `- local_plugin_version_input_ignored_reason: ${evidence.local_plugin_version_input_ignored_reason || "n/a"}`,
       `- local_plugin_expected_version: ${localPluginVersionPlan.expected_version || "n/a"}`,
       `- local_plugin_package_version: ${evidence.local_plugin_package_version}`,
       `- local_plugin_package_previous_version: ${evidence.local_plugin_package_previous_version}`,
@@ -1518,6 +1547,8 @@ export async function run() {
   appendOutput("local_plugin_version_required", String(localPluginVersionPlan.version_required));
   appendOutput("local_plugin_version_source", evidence.local_plugin_version_source);
   appendOutput("local_plugin_version_auto_incremented", String(evidence.local_plugin_version_auto_incremented));
+  appendOutput("local_plugin_version_input_ignored", String(evidence.local_plugin_version_input_ignored));
+  appendOutput("local_plugin_version_input_ignored_reason", evidence.local_plugin_version_input_ignored_reason || "");
   appendOutput("local_plugin_expected_version", localPluginVersionPlan.expected_version || "");
   appendOutput("local_plugin_package_version", evidence.local_plugin_package_version);
   appendOutput("local_plugin_package_previous_version", evidence.local_plugin_package_previous_version);

@@ -90,6 +90,8 @@ jobs:
           LOCAL_PLUGIN_VERSION_REQUIRED: ${{ steps.prepare.outputs.local_plugin_version_required }}
           LOCAL_PLUGIN_VERSION_SOURCE: ${{ steps.prepare.outputs.local_plugin_version_source }}
           LOCAL_PLUGIN_VERSION_AUTO_INCREMENTED: ${{ steps.prepare.outputs.local_plugin_version_auto_incremented }}
+          LOCAL_PLUGIN_VERSION_INPUT_IGNORED: ${{ steps.prepare.outputs.local_plugin_version_input_ignored }}
+          LOCAL_PLUGIN_VERSION_INPUT_IGNORED_REASON: ${{ steps.prepare.outputs.local_plugin_version_input_ignored_reason }}
           LOCAL_PLUGIN_PACKAGE_VERSION: ${{ steps.prepare.outputs.local_plugin_package_version }}
           LOCAL_PLUGIN_PACKAGE_PREVIOUS_VERSION: ${{ steps.prepare.outputs.local_plugin_package_previous_version }}
           LOCAL_PLUGIN_PACKAGE_VERSION_CHANGED: ${{ steps.prepare.outputs.local_plugin_package_version_changed }}
@@ -116,6 +118,8 @@ jobs:
             echo "- local_plugin_version_required: ${LOCAL_PLUGIN_VERSION_REQUIRED}"
             echo "- local_plugin_version_source: ${LOCAL_PLUGIN_VERSION_SOURCE}"
             echo "- local_plugin_version_auto_incremented: ${LOCAL_PLUGIN_VERSION_AUTO_INCREMENTED}"
+            echo "- local_plugin_version_input_ignored: ${LOCAL_PLUGIN_VERSION_INPUT_IGNORED}"
+            echo "- local_plugin_version_input_ignored_reason: ${LOCAL_PLUGIN_VERSION_INPUT_IGNORED_REASON:-n/a}"
             echo "- local_plugin_package_version: ${LOCAL_PLUGIN_PACKAGE_VERSION}"
             echo "- local_plugin_package_previous_version: ${LOCAL_PLUGIN_PACKAGE_PREVIOUS_VERSION}"
             echo "- local_plugin_package_version_changed: ${LOCAL_PLUGIN_PACKAGE_VERSION_CHANGED}"

@@ -186,6 +186,9 @@ test("resolves the local plugin docs version from package or auto patch incremen
     version_required: true,
     version_source: "apps/memos-local-plugin/package.json",
     auto_incremented: false,
+    input_ignored: false,
+    input_ignored_reason: "",
+    input_raw: "",
     package_previous_version: "v2.0.10",
     package_version: "v2.0.11",
     package_version_changed: true,
@@ -199,6 +202,9 @@ test("resolves the local plugin docs version from package or auto patch incremen
     version_required: true,
     version_source: "apps/memos-local-plugin/package.json",
     auto_incremented: false,
+    input_ignored: false,
+    input_ignored_reason: "",
+    input_raw: "2.0.11",
     package_previous_version: "v2.0.10",
     package_version: "v2.0.11",
     package_version_changed: true,
@@ -226,6 +232,9 @@ test("resolves the local plugin docs version from package or auto patch incremen
       version_required: true,
       version_source: "auto_patch_from_previous_released_version",
       auto_incremented: true,
+      input_ignored: false,
+      input_ignored_reason: "",
+      input_raw: "",
       package_previous_version: "v2.0.10",
       package_version: "v2.0.10",
       package_version_changed: false,
@@ -285,8 +294,11 @@ test("resolves the local plugin docs version from package or auto patch incremen
       version: "v2.0.10",
       version_changed: false,
       version_required: false,
-      version_source: "unchanged_no_user_facing_changes",
+      version_source: "no_user_facing_product_changes",
       auto_incremented: false,
+      input_ignored: false,
+      input_ignored_reason: "",
+      input_raw: "",
       package_previous_version: "v2.0.10",
       package_version: "v2.0.10",
       package_version_changed: false,
@@ -302,6 +314,80 @@ test("resolves the local plugin docs version from package or auto patch incremen
         local_plugin_package_version_raw: "2.0.9",
       }),
     /moved backwards/,
+  );
+});
+
+test("ignores local plugin version input when the release has no local-plugin path changes", () => {
+  assert.deepEqual(
+    validateLocalPluginVersionPlan(
+      {
+        ...evidence,
+        has_product_changes: false,
+        has_user_facing_product_changes: false,
+        local_plugin_previous_version: "v2.0.10",
+        local_plugin_previous_version_raw: "2.0.10",
+        local_plugin_version: "v2.0.10",
+        local_plugin_version_raw: "2.0.10",
+        local_plugin_version_changed: false,
+        local_plugin_package_version: "v2.0.10",
+        local_plugin_package_version_raw: "2.0.10",
+        local_plugin_package_version_changed: false,
+      },
+      "v9.9.9",
+    ),
+    {
+      ok: true,
+      expected_version: "",
+      previous_version: "v2.0.10",
+      version: "v2.0.10",
+      version_changed: false,
+      version_required: false,
+      version_source: "no_product_path_changes",
+      auto_incremented: false,
+      input_ignored: true,
+      input_ignored_reason: "no local plugin path changes in apps/memos-local-plugin/**",
+      input_raw: "v9.9.9",
+      package_previous_version: "v2.0.10",
+      package_version: "v2.0.10",
+      package_version_changed: false,
+    },
+  );
+});
+
+test("ignores local plugin version input for maintenance-only local-plugin changes", () => {
+  assert.deepEqual(
+    validateLocalPluginVersionPlan(
+      {
+        ...evidence,
+        has_product_changes: true,
+        has_user_facing_product_changes: false,
+        local_plugin_previous_version: "v2.0.10",
+        local_plugin_previous_version_raw: "2.0.10",
+        local_plugin_version: "v2.0.10",
+        local_plugin_version_raw: "2.0.10",
+        local_plugin_version_changed: false,
+        local_plugin_package_version: "v2.0.12",
+        local_plugin_package_version_raw: "2.0.12",
+        local_plugin_package_version_changed: true,
+      },
+      "2.0.12",
+    ),
+    {
+      ok: true,
+      expected_version: "",
+      previous_version: "v2.0.10",
+      version: "v2.0.10",
+      version_changed: false,
+      version_required: false,
+      version_source: "no_user_facing_product_changes",
+      auto_incremented: false,
+      input_ignored: true,
+      input_ignored_reason: "local plugin path changed, but no user-facing feature/fix/performance evidence was found",
+      input_raw: "2.0.12",
+      package_previous_version: "v2.0.10",
+      package_version: "v2.0.12",
+      package_version_changed: true,
+    },
   );
 });
 
