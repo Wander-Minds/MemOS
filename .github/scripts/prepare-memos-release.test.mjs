@@ -11,6 +11,7 @@ import {
   buildDocsPreview,
   collectLocalPluginEvidence,
   compareSemver,
+  cleanLocalPluginVersion,
   cleanVersion,
   docsPreviewMarkdown,
   existingReleaseTagState,
@@ -20,6 +21,7 @@ import {
   requestDocAgentDraft,
   sourceRefsFromText,
   validateDraft,
+  validateLocalPluginVersionPlan,
   validatePublishConfirmation,
   validateReleaseTarget,
 } from "./prepare-memos-release.mjs";
@@ -28,8 +30,15 @@ const evidence = {
   repo: "MemTensor/MemOS",
   previous_tag: "v2.0.24",
   current_tag: "v2.0.25",
+  local_plugin_previous_version: "v2.0.10",
+  local_plugin_previous_version_raw: "2.0.10",
+  local_plugin_version: "v2.0.11",
+  local_plugin_version_raw: "2.0.11",
+  local_plugin_version_changed: true,
+  local_plugin_version_source: "apps/memos-local-plugin/package.json",
   product_paths: ["apps/memos-local-plugin/**"],
   has_product_changes: true,
+  has_user_facing_product_changes: true,
   commits: [
     {
       sha: "9deb941e00000000000000000000000000000000",
@@ -153,6 +162,54 @@ test("extracts PR refs from GitHub release note wording", () => {
 test("rejects leading v in manual version input", () => {
   assert.equal(cleanVersion("2.0.25"), "2.0.25");
   assert.throws(() => cleanVersion("v2.0.25"), /must not include a leading v/);
+  assert.equal(cleanLocalPluginVersion("2.0.12"), "2.0.12");
+  assert.throws(() => cleanLocalPluginVersion(""), /is required/);
+  assert.throws(() => cleanLocalPluginVersion("v2.0.12"), /must not include a leading v/);
+});
+
+test("requires local plugin version to increase for user-facing plugin changes", () => {
+  assert.deepEqual(validateLocalPluginVersionPlan(evidence, ""), {
+    ok: true,
+    expected_version: "",
+    previous_version: "v2.0.10",
+    version: "v2.0.11",
+    version_changed: true,
+    version_required: true,
+    version_source: "apps/memos-local-plugin/package.json",
+  });
+  assert.deepEqual(validateLocalPluginVersionPlan(evidence, "2.0.11"), {
+    ok: true,
+    expected_version: "v2.0.11",
+    previous_version: "v2.0.10",
+    version: "v2.0.11",
+    version_changed: true,
+    version_required: true,
+    version_source: "apps/memos-local-plugin/package.json",
+  });
+  assert.throws(() => validateLocalPluginVersionPlan(evidence, "2.0.12"), /does not match/);
+  assert.throws(
+    () =>
+      validateLocalPluginVersionPlan({
+        ...evidence,
+        local_plugin_previous_version: "v2.0.10",
+        local_plugin_previous_version_raw: "2.0.10",
+        local_plugin_version: "v2.0.10",
+        local_plugin_version_raw: "2.0.10",
+        local_plugin_version_changed: false,
+      }),
+    /version did not increase/,
+  );
+  assert.doesNotThrow(() =>
+    validateLocalPluginVersionPlan({
+      ...evidence,
+      has_user_facing_product_changes: false,
+      local_plugin_previous_version: "v2.0.10",
+      local_plugin_previous_version_raw: "2.0.10",
+      local_plugin_version: "v2.0.10",
+      local_plugin_version_raw: "2.0.10",
+      local_plugin_version_changed: false,
+    }),
+  );
 });
 
 test("requires an exact publish confirmation for non-dry-run releases", () => {
@@ -196,6 +253,8 @@ test("inspection artifact contract includes generic aliases and side-effect proo
   assert.match(script, /public_release_body:\s+"github_generated_whats_changed"/);
   assert.match(script, /existing_tag:\s+existingTag/);
   assert.match(script, /publish_blocked:\s+existingTag\.publish_blocked/);
+  assert.match(script, /local_plugin_version_plan/);
+  assert.match(script, /local_plugin_version_required/);
   assert.match(script, /no_side_effects:\s+\{/);
   assert.match(script, /npm_publish:\s+false/);
   assert.match(script, /production_docs_pr:\s+false/);
@@ -300,6 +359,9 @@ test("filters mixed MemOS release evidence down to local-plugin paths", () => {
     assert.equal(result.required_source_refs.length, 1);
     assert.ok(result.required_source_refs[0].accepted_refs.includes("#11"));
     assert.ok(result.important_diff["apps/memos-local-plugin/**"][0].path.endsWith("provider-routing.js"));
+    assert.equal(result.local_plugin_previous_version, "v9.9.0");
+    assert.equal(result.local_plugin_version, "v9.9.0");
+    assert.equal(result.local_plugin_version_changed, false);
   });
 });
 
@@ -709,15 +771,22 @@ test("builds Plugin tab previews without exposing source refs in page content", 
   assert.equal(preview.source_repo, "MemTensor/MemOS");
   assert.equal(preview.previous_tag, "v2.0.24");
   assert.equal(preview.current_tag, "v2.0.25");
+  assert.equal(preview.memos_release_tag, "v2.0.25");
+  assert.equal(preview.local_plugin_version, "v2.0.11");
+  assert.equal(preview.local_plugin_previous_version, "v2.0.10");
   assert.equal(preview.would_create_docs_pr, false);
   assert.deepEqual(preview.files, ["content/cn/plugin-changelog.yml", "content/en/plugin-changelog.yml"]);
-  assert.equal(preview.cn.name, "v2.0.25");
+  assert.equal(preview.cn.name, "v2.0.11");
   assert.equal(preview.cn.source.repo, "MemTensor/MemOS");
+  assert.equal(preview.cn.source.memos_release_tag, "v2.0.25");
+  assert.equal(preview.cn.source.local_plugin_version, "v2.0.11");
   assert.deepEqual(preview.cn.source.product_paths, ["apps/memos-local-plugin/**"]);
   assert.equal(preview.cn.products.plugin["New Features"][0].type, "OpenClaw 本地插件");
   assert.equal(preview.en.products.plugin.Improvements[0].type, "OpenClaw Local Plugin");
 
   const markdown = docsPreviewMarkdown(preview, validDraft, evidence);
+  assert.match(markdown, /OpenClaw 本地插件-v2\.0\.11/);
+  assert.match(markdown, /memos_release_range: v2\.0\.24\.\.\.v2\.0\.25/);
   assert.match(markdown, /Source Refs/);
   assert.match(markdown, /9deb941e/);
   assert.match(markdown, /59c14746/);

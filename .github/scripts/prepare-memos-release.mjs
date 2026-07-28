@@ -107,6 +107,14 @@ export function displayVersion(raw) {
   return value ? `v${value}` : "";
 }
 
+export function cleanLocalPluginVersion(raw, label = "local_plugin_version") {
+  const value = String(raw || "").trim();
+  if (!value) fail(`${label} is required.`);
+  if (value.startsWith("v")) fail(`${label} must not include a leading v.`);
+  if (!parseSemver(value)) fail(`${label} must be a valid semver version, for example 2.0.12.`);
+  return value;
+}
+
 export function parseSemver(raw) {
   const value = String(raw || "").trim().replace(/^v/, "");
   const match = value.match(/^(\d+)\.(\d+)\.(\d+)(?:-([0-9A-Za-z.-]+))?(?:\+[0-9A-Za-z.-]+)?$/);
@@ -443,6 +451,61 @@ function packageChanges(previousTag, currentRef) {
   return changes;
 }
 
+function localPluginPackageVersions(previousTag, currentRef) {
+  const path = `${PRODUCT_PATH}/package.json`;
+  const before = gitShowJson(previousTag, path);
+  const after = gitShowJson(currentRef, path);
+  const previousVersion = cleanLocalPluginVersion(before.version, "previous local plugin package.json version");
+  const currentVersion = cleanLocalPluginVersion(after.version, "local plugin package.json version");
+  return {
+    previous_version_raw: previousVersion,
+    version_raw: currentVersion,
+    previous_version: displayVersion(previousVersion),
+    version: displayVersion(currentVersion),
+    version_changed: previousVersion !== currentVersion,
+    version_source: path,
+  };
+}
+
+export function validateLocalPluginVersionPlan(evidence, expectedVersionInput = "") {
+  const expectedVersion = String(expectedVersionInput || "").trim()
+    ? cleanLocalPluginVersion(expectedVersionInput, "local_plugin_version input")
+    : "";
+  const previousVersion = cleanLocalPluginVersion(
+    evidence.local_plugin_previous_version_raw,
+    "previous local plugin package.json version",
+  );
+  const currentVersion = cleanLocalPluginVersion(
+    evidence.local_plugin_version_raw,
+    "local plugin package.json version",
+  );
+  const order = compareSemver(currentVersion, previousVersion);
+  if (expectedVersion && expectedVersion !== currentVersion) {
+    fail(
+      `local_plugin_version input ${displayVersion(expectedVersion)} does not match ${PRODUCT_PATH}/package.json version ${displayVersion(currentVersion)}.`,
+    );
+  }
+  if (order < 0) {
+    fail(
+      `OpenClaw local plugin package version moved backwards: ${displayVersion(previousVersion)} -> ${displayVersion(currentVersion)}.`,
+    );
+  }
+  if (evidence.has_user_facing_product_changes && order <= 0) {
+    fail(
+      `OpenClaw local plugin has user-facing changes in ${evidence.previous_tag}..${evidence.current_tag}, but ${PRODUCT_PATH}/package.json version did not increase: ${displayVersion(previousVersion)} -> ${displayVersion(currentVersion)}. Bump the local plugin package version before running the MemOS release.`,
+    );
+  }
+  return {
+    ok: true,
+    expected_version: expectedVersion ? displayVersion(expectedVersion) : "",
+    previous_version: displayVersion(previousVersion),
+    version: displayVersion(currentVersion),
+    version_changed: previousVersion !== currentVersion,
+    version_required: Boolean(evidence.has_user_facing_product_changes),
+    version_source: `${PRODUCT_PATH}/package.json`,
+  };
+}
+
 function collectPatchSnippets(range, changedFiles) {
   const interesting = changedFiles
     .map((item) => item.path)
@@ -506,6 +569,7 @@ export function collectLocalPluginEvidence({ previousTag, currentTag, currentRef
   const evidenceCommits = evidenceCommitsForRelease(commits, aggregateItems, { revertedKeys });
   const importantCommits = evidenceCommits.filter((commit) => isImportantCommit(commit, { revertedKeys }));
   const skipReason = localPluginSkipReason({ changedFiles, importantCommits });
+  const localPluginVersion = localPluginPackageVersions(previousTag, currentRef);
   return {
     product_id: PRODUCT_ID,
     product_title: PRODUCT_TITLE,
@@ -514,6 +578,13 @@ export function collectLocalPluginEvidence({ previousTag, currentTag, currentRef
     previous_tag: previousTag,
     current_tag: currentTag,
     target_version: displayVersion(targetVersion),
+    memos_release_version: displayVersion(targetVersion),
+    local_plugin_previous_version: localPluginVersion.previous_version,
+    local_plugin_previous_version_raw: localPluginVersion.previous_version_raw,
+    local_plugin_version: localPluginVersion.version,
+    local_plugin_version_raw: localPluginVersion.version_raw,
+    local_plugin_version_changed: localPluginVersion.version_changed,
+    local_plugin_version_source: localPluginVersion.version_source,
     git_ref: currentRef,
     product_paths: PRODUCT_PATHS,
     has_product_changes: changedFiles.length > 0,
@@ -1080,6 +1151,7 @@ export async function requestDocAgentDraft(evidence) {
 }
 
 export function buildDocsPreview(draft, evidence) {
+  const localPluginVersion = evidence.local_plugin_version || evidence.current_tag;
   const makeSide = (language) => {
     const categories = {};
     for (const releaseCategory of RELEASE_CATEGORY_ORDER) {
@@ -1098,12 +1170,16 @@ export function buildDocsPreview(draft, evidence) {
       }
     }
     return {
-      name: evidence.current_tag,
+      name: localPluginVersion,
       source: {
         repo: evidence.repo,
         tag: evidence.current_tag,
+        memos_release_tag: evidence.current_tag,
         release_url: `https://github.com/${evidence.repo}/releases/tag/${evidence.current_tag}`,
         previous_tag: evidence.previous_tag,
+        local_plugin_version: evidence.local_plugin_version,
+        local_plugin_previous_version: evidence.local_plugin_previous_version,
+        local_plugin_version_source: evidence.local_plugin_version_source,
         product_paths: evidence.product_paths,
       },
       products: {
@@ -1117,6 +1193,10 @@ export function buildDocsPreview(draft, evidence) {
     source_ref: evidence.git_ref,
     previous_tag: evidence.previous_tag,
     current_tag: evidence.current_tag,
+    memos_release_tag: evidence.current_tag,
+    local_plugin_version: evidence.local_plugin_version,
+    local_plugin_previous_version: evidence.local_plugin_previous_version,
+    local_plugin_version_changed: evidence.local_plugin_version_changed,
     product_paths: evidence.product_paths,
     has_product_changes: evidence.has_product_changes,
     has_user_facing_product_changes: evidence.has_user_facing_product_changes,
@@ -1131,10 +1211,13 @@ export function buildDocsPreview(draft, evidence) {
 
 export function docsPreviewMarkdown(preview, draft, evidence) {
   const lines = [
-    `# ${PRODUCT_TITLE.zh}-${evidence.current_tag}`,
+    `# ${PRODUCT_TITLE.zh}-${evidence.local_plugin_version || evidence.current_tag}`,
     "",
     `- source: ${evidence.repo}`,
-    `- range: ${evidence.previous_tag}...${evidence.current_tag}`,
+    `- memos_release_range: ${evidence.previous_tag}...${evidence.current_tag}`,
+    `- local_plugin_version: ${evidence.local_plugin_version || "n/a"}`,
+    `- local_plugin_previous_version: ${evidence.local_plugin_previous_version || "n/a"}`,
+    `- local_plugin_version_source: ${evidence.local_plugin_version_source || `${PRODUCT_PATH}/package.json`}`,
     `- product_paths: ${evidence.product_paths.join(", ")}`,
     "",
   ];
@@ -1219,6 +1302,8 @@ export async function run() {
     targetVersion: version,
     repo,
   });
+  const localPluginVersionPlan = validateLocalPluginVersionPlan(evidence, process.env.LOCAL_PLUGIN_VERSION || "");
+  evidence.local_plugin_version_plan = localPluginVersionPlan;
   evidence.memos_release_notes = {
     source: releaseNotes.source,
     name: releaseNotes.name,
@@ -1268,6 +1353,13 @@ export async function run() {
     release_notes_source: releaseNotes.source,
     current_tag: currentTag,
     previous_tag: previousTag,
+    memos_release_tag: currentTag,
+    local_plugin_version: evidence.local_plugin_version,
+    local_plugin_previous_version: evidence.local_plugin_previous_version,
+    local_plugin_version_changed: evidence.local_plugin_version_changed,
+    local_plugin_version_required: localPluginVersionPlan.version_required,
+    local_plugin_version_source: evidence.local_plugin_version_source,
+    local_plugin_expected_version: localPluginVersionPlan.expected_version,
     existing_tag: existingTag,
     publish_blocked: existingTag.publish_blocked,
     target_ref: target.ref,
@@ -1308,6 +1400,12 @@ export async function run() {
       `- dry_run: ${dryRun}`,
       `- current_tag: ${currentTag}`,
       `- previous_tag: ${previousTag}`,
+      `- local_plugin_version: ${evidence.local_plugin_version}`,
+      `- local_plugin_previous_version: ${evidence.local_plugin_previous_version}`,
+      `- local_plugin_version_changed: ${evidence.local_plugin_version_changed}`,
+      `- local_plugin_version_required: ${localPluginVersionPlan.version_required}`,
+      `- local_plugin_version_source: ${evidence.local_plugin_version_source}`,
+      `- local_plugin_expected_version: ${localPluginVersionPlan.expected_version || "n/a"}`,
       `- existing_tag_status: ${existingTag.status}`,
       `- existing_tag_sha: ${existingTag.tag_sha || "n/a"}`,
       `- publish_blocked: ${existingTag.publish_blocked}`,
@@ -1350,6 +1448,12 @@ export async function run() {
   appendOutput("source_id", PRODUCT_ID);
   appendOutput("previous_tag", previousTag);
   appendOutput("current_tag", currentTag);
+  appendOutput("local_plugin_version", evidence.local_plugin_version);
+  appendOutput("local_plugin_previous_version", evidence.local_plugin_previous_version);
+  appendOutput("local_plugin_version_changed", String(evidence.local_plugin_version_changed));
+  appendOutput("local_plugin_version_required", String(localPluginVersionPlan.version_required));
+  appendOutput("local_plugin_version_source", evidence.local_plugin_version_source);
+  appendOutput("local_plugin_expected_version", localPluginVersionPlan.expected_version || "");
   appendOutput("existing_tag_status", existingTag.status);
   appendOutput("existing_tag_sha", existingTag.tag_sha || "");
   appendOutput("publish_blocked", String(existingTag.publish_blocked));
@@ -1367,6 +1471,7 @@ export async function run() {
   console.log(`Prepared MemOS release inspection in ${outputRoot}`);
   console.log(`Release notes source: ${releaseNotes.source}`);
   console.log(`Range: ${previousTag}..${target.sha}`);
+  console.log(`OpenClaw local plugin version: ${evidence.local_plugin_previous_version} -> ${evidence.local_plugin_version}`);
   console.log(`OpenClaw local plugin changed files: ${evidence.changed_files.length}`);
 }
 
