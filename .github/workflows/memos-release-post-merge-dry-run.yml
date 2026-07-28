@@ -4,22 +4,20 @@ on:
   push:
     branches:
       - main
+    paths:
+      - ".github/workflows/memos-release-publish.yml"
+      - ".github/workflows/memos-release-pre-merge-dry-run.yml"
+      - ".github/workflows/memos-release-post-merge-dry-run.yml"
+      - ".github/scripts/prepare-memos-release.mjs"
+      - ".github/scripts/prepare-memos-release.test.mjs"
+      - ".github/scripts/retry.sh"
 
 permissions:
   contents: read
 
 jobs:
   dry-run:
-    if: >-
-      ${{
-        github.repository == 'MemTensor/MemOS' &&
-        (
-          contains(github.event.head_commit.message, 'release: merge dev-v') ||
-          contains(github.event.head_commit.message, 'dev-v') ||
-          contains(github.event.head_commit.message, 'Merge 2.0.') ||
-          contains(github.event.head_commit.message, 'chore: update version to v')
-        )
-      }}
+    if: ${{ github.repository == 'MemTensor/MemOS' }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -40,19 +38,8 @@ jobs:
       - name: Infer next stable release version for preview
         id: version
         shell: bash
-        env:
-          HEAD_COMMIT_MESSAGE: ${{ github.event.head_commit.message }}
         run: |
           set -euo pipefail
-          message_version="$(
-            printf '%s\n' "${HEAD_COMMIT_MESSAGE}" |
-              sed -nE \
-                -e 's/.*dev-v([0-9]+\.[0-9]+\.[0-9]+).*/\1/p' \
-                -e 's/.*Merge v([0-9]+\.[0-9]+\.[0-9]+) into main.*/\1/p' \
-                -e 's/.*Merge ([0-9]+\.[0-9]+\.[0-9]+) into main.*/\1/p' \
-                -e 's/.*update version to v([0-9]+\.[0-9]+\.[0-9]+).*/\1/p' |
-              head -n 1
-          )"
           latest="$(
             git tag --list 'v[0-9]*.[0-9]*.[0-9]*' --merged origin/main --sort=-v:refname |
               grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' |
@@ -64,10 +51,9 @@ jobs:
           fi
           version="${latest#v}"
           IFS=. read -r major minor patch <<< "${version}"
-          next_version="${message_version:-${major}.${minor}.$((patch + 1))}"
+          next_version="${major}.${minor}.$((patch + 1))"
           echo "version=${next_version}" >> "${GITHUB_OUTPUT}"
           echo "latest_tag=${latest}" >> "${GITHUB_OUTPUT}"
-          echo "message_version=${message_version}" >> "${GITHUB_OUTPUT}"
 
       - name: Run release workflow tests
         shell: bash
@@ -98,7 +84,6 @@ jobs:
         env:
           VERSION: ${{ steps.version.outputs.version }}
           LATEST_TAG: ${{ steps.version.outputs.latest_tag }}
-          MESSAGE_VERSION: ${{ steps.version.outputs.message_version }}
           CURRENT_TAG: ${{ steps.prepare.outputs.current_tag }}
           PREVIOUS_TAG: ${{ steps.prepare.outputs.previous_tag }}
           LOCAL_PLUGIN_VERSION: ${{ steps.prepare.outputs.local_plugin_version }}
@@ -127,7 +112,6 @@ jobs:
             echo ""
             echo "- inferred_version: ${VERSION}"
             echo "- latest_tag_on_main: ${LATEST_TAG}"
-            echo "- version_from_commit_message: ${MESSAGE_VERSION:-n/a}"
             echo "- current_tag: ${CURRENT_TAG}"
             echo "- previous_tag: ${PREVIOUS_TAG}"
             echo "- local_plugin_version: ${LOCAL_PLUGIN_VERSION}"

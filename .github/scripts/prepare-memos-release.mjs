@@ -184,27 +184,6 @@ export function validateReleaseTarget({ dryRun, targetRef }) {
   }
 }
 
-export function releaseBranchVersion(ref) {
-  const value = String(ref || "")
-    .trim()
-    .replace(/^refs\/heads\//, "")
-    .replace(/^origin\//, "");
-  const match = value.match(/^dev-v(\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?)$/);
-  return match ? { branch: value, version: match[1] } : { branch: value, version: "" };
-}
-
-export function validateReleaseBranchVersion({ version, targetRef, releaseBranch = "" }) {
-  const release = releaseBranchVersion(releaseBranch || targetRef);
-  if (!release.version) return release;
-  const targetVersion = cleanVersion(version);
-  if (targetVersion !== release.version) {
-    fail(
-      `Release branch ${release.branch} is for v${release.version}, but version input is v${targetVersion}. Use version=${release.version}, or release from main after the release branch is merged.`,
-    );
-  }
-  return release;
-}
-
 export function findPreviousMemOSTag(targetVersion, currentTag, tags) {
   const target = cleanVersion(targetVersion);
   const targetParsed = parseSemver(target);
@@ -1363,11 +1342,6 @@ export async function run() {
   const repo = process.env.GITHUB_REPOSITORY || "MemTensor/MemOS";
   const targetRefInput = process.env.TARGET_REF || "main";
   validateReleaseTarget({ dryRun, targetRef: targetRefInput });
-  const releaseBranch = validateReleaseBranchVersion({
-    version,
-    targetRef: targetRefInput,
-    releaseBranch: process.env.RELEASE_BRANCH || "",
-  });
   const target = resolveRef(targetRefInput);
   const previousTag = process.env.PREVIOUS_TAG || findPreviousMemOSTag(version, currentTag, listTags());
   if (!previousTag) fail(`Cannot find previous MemOS v* tag before ${currentTag}.`);
@@ -1394,8 +1368,6 @@ export async function run() {
     targetVersion: version,
     repo,
   });
-  evidence.release_branch = releaseBranch.version ? releaseBranch.branch : "";
-  evidence.release_branch_version = releaseBranch.version ? displayVersion(releaseBranch.version) : "";
   const localPluginVersionPlan = validateLocalPluginVersionPlan(evidence, process.env.LOCAL_PLUGIN_VERSION || "");
   evidence.local_plugin_version_plan = localPluginVersionPlan;
   evidence.local_plugin_previous_version = localPluginVersionPlan.previous_version;
@@ -1479,8 +1451,6 @@ export async function run() {
     publish_blocked: existingTag.publish_blocked,
     target_ref: target.ref,
     target_sha: target.sha,
-    release_branch: releaseBranch.version ? releaseBranch.branch : "",
-    release_branch_version: releaseBranch.version ? displayVersion(releaseBranch.version) : "",
     product_paths: evidence.product_paths,
     has_product_changes: evidence.has_product_changes,
     has_user_facing_product_changes: evidence.has_user_facing_product_changes,
@@ -1534,8 +1504,6 @@ export async function run() {
       `- publish_blocked: ${existingTag.publish_blocked}`,
       `- target_ref: ${target.ref}`,
       `- target_sha: ${target.sha}`,
-      `- release_branch: ${releaseBranch.version ? releaseBranch.branch : "n/a"}`,
-      `- release_branch_version: ${releaseBranch.version ? displayVersion(releaseBranch.version) : "n/a"}`,
       `- product_paths: ${evidence.product_paths.join(", ")}`,
       `- release_notes_source: ${releaseNotes.source}`,
       `- has_product_changes: ${evidence.has_product_changes}`,
@@ -1591,8 +1559,6 @@ export async function run() {
   appendOutput("publish_block_reason", existingTag.publish_blocked ? existingTag.message : "");
   appendOutput("target_ref", target.ref);
   appendOutput("target_sha", target.sha);
-  appendOutput("release_branch", releaseBranch.version ? releaseBranch.branch : "");
-  appendOutput("release_branch_version", releaseBranch.version ? displayVersion(releaseBranch.version) : "");
   appendOutput("has_product_changes", String(evidence.has_product_changes));
   appendOutput("has_user_facing_product_changes", String(evidence.has_user_facing_product_changes));
   appendOutput("docs_action", preview.docs_action);
