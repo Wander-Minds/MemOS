@@ -88,6 +88,11 @@ jobs:
           LOCAL_PLUGIN_PREVIOUS_VERSION: ${{ steps.prepare.outputs.local_plugin_previous_version }}
           LOCAL_PLUGIN_VERSION_CHANGED: ${{ steps.prepare.outputs.local_plugin_version_changed }}
           LOCAL_PLUGIN_VERSION_REQUIRED: ${{ steps.prepare.outputs.local_plugin_version_required }}
+          LOCAL_PLUGIN_VERSION_SOURCE: ${{ steps.prepare.outputs.local_plugin_version_source }}
+          LOCAL_PLUGIN_VERSION_AUTO_INCREMENTED: ${{ steps.prepare.outputs.local_plugin_version_auto_incremented }}
+          LOCAL_PLUGIN_PACKAGE_VERSION: ${{ steps.prepare.outputs.local_plugin_package_version }}
+          LOCAL_PLUGIN_PACKAGE_PREVIOUS_VERSION: ${{ steps.prepare.outputs.local_plugin_package_previous_version }}
+          LOCAL_PLUGIN_PACKAGE_VERSION_CHANGED: ${{ steps.prepare.outputs.local_plugin_package_version_changed }}
           EXISTING_TAG_STATUS: ${{ steps.prepare.outputs.existing_tag_status }}
           EXISTING_TAG_SHA: ${{ steps.prepare.outputs.existing_tag_sha }}
           PUBLISH_BLOCKED: ${{ steps.prepare.outputs.publish_blocked }}
@@ -109,6 +114,11 @@ jobs:
             echo "- local_plugin_previous_version: ${LOCAL_PLUGIN_PREVIOUS_VERSION}"
             echo "- local_plugin_version_changed: ${LOCAL_PLUGIN_VERSION_CHANGED}"
             echo "- local_plugin_version_required: ${LOCAL_PLUGIN_VERSION_REQUIRED}"
+            echo "- local_plugin_version_source: ${LOCAL_PLUGIN_VERSION_SOURCE}"
+            echo "- local_plugin_version_auto_incremented: ${LOCAL_PLUGIN_VERSION_AUTO_INCREMENTED}"
+            echo "- local_plugin_package_version: ${LOCAL_PLUGIN_PACKAGE_VERSION}"
+            echo "- local_plugin_package_previous_version: ${LOCAL_PLUGIN_PACKAGE_PREVIOUS_VERSION}"
+            echo "- local_plugin_package_version_changed: ${LOCAL_PLUGIN_PACKAGE_VERSION_CHANGED}"
             echo "- existing_tag_status: ${EXISTING_TAG_STATUS}"
             echo "- existing_tag_sha: ${EXISTING_TAG_SHA:-n/a}"
             echo "- publish_blocked: ${PUBLISH_BLOCKED}"

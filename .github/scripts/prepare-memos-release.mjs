@@ -156,6 +156,18 @@ export function compareSemver(a, b) {
   return 0;
 }
 
+export function incrementPatchVersion(raw) {
+  const version = cleanLocalPluginVersion(raw, "local plugin version to auto-increment");
+  const parsed = parseSemver(version);
+  if (!parsed) fail(`Cannot auto-increment invalid local plugin version: ${version}`);
+  if (parsed.prerelease.length) {
+    fail(
+      `Cannot auto-increment prerelease local plugin version ${displayVersion(version)} automatically. Provide an explicit local_plugin_version guard after release-owner review.`,
+    );
+  }
+  return `${parsed.major}.${parsed.minor}.${parsed.patch + 1}`;
+}
+
 export function validatePublishConfirmation({ dryRun, version, confirmation }) {
   if (String(dryRun) === "true") return;
   const expected = `PUBLISH v${cleanVersion(version)}`;
@@ -471,38 +483,55 @@ export function validateLocalPluginVersionPlan(evidence, expectedVersionInput = 
   const expectedVersion = String(expectedVersionInput || "").trim()
     ? cleanLocalPluginVersion(expectedVersionInput, "local_plugin_version input")
     : "";
-  const previousVersion = cleanLocalPluginVersion(
-    evidence.local_plugin_previous_version_raw,
+  const previousReleasedVersion = cleanLocalPluginVersion(
+    evidence.local_plugin_previous_version_raw || evidence.local_plugin_package_previous_version_raw,
+    "previous released OpenClaw local plugin version",
+  );
+  const previousPackageVersion = cleanLocalPluginVersion(
+    evidence.local_plugin_package_previous_version_raw || evidence.local_plugin_previous_version_raw,
     "previous local plugin package.json version",
   );
-  const currentVersion = cleanLocalPluginVersion(
-    evidence.local_plugin_version_raw,
+  const currentPackageVersion = cleanLocalPluginVersion(
+    evidence.local_plugin_package_version_raw || evidence.local_plugin_version_raw,
     "local plugin package.json version",
   );
-  const order = compareSemver(currentVersion, previousVersion);
-  if (expectedVersion && expectedVersion !== currentVersion) {
+  const packageOrder = compareSemver(currentPackageVersion, previousPackageVersion);
+  const packageVsReleasedOrder = compareSemver(currentPackageVersion, previousReleasedVersion);
+  if (packageOrder < 0) {
     fail(
-      `local_plugin_version input ${displayVersion(expectedVersion)} does not match ${PRODUCT_PATH}/package.json version ${displayVersion(currentVersion)}.`,
+      `OpenClaw local plugin package version moved backwards: ${displayVersion(previousPackageVersion)} -> ${displayVersion(currentPackageVersion)}.`,
     );
   }
-  if (order < 0) {
-    fail(
-      `OpenClaw local plugin package version moved backwards: ${displayVersion(previousVersion)} -> ${displayVersion(currentVersion)}.`,
-    );
+
+  let resolvedVersion = currentPackageVersion;
+  let versionSource = `${PRODUCT_PATH}/package.json`;
+  let autoIncremented = false;
+  if (evidence.has_user_facing_product_changes && packageVsReleasedOrder <= 0) {
+    resolvedVersion = incrementPatchVersion(previousReleasedVersion);
+    versionSource = "auto_patch_from_previous_released_version";
+    autoIncremented = true;
+  } else if (!evidence.has_user_facing_product_changes && packageVsReleasedOrder <= 0) {
+    resolvedVersion = previousReleasedVersion;
+    versionSource = "unchanged_no_user_facing_changes";
   }
-  if (evidence.has_user_facing_product_changes && order <= 0) {
+
+  if (expectedVersion && expectedVersion !== resolvedVersion) {
     fail(
-      `OpenClaw local plugin has user-facing changes in ${evidence.previous_tag}..${evidence.current_tag}, but ${PRODUCT_PATH}/package.json version did not increase: ${displayVersion(previousVersion)} -> ${displayVersion(currentVersion)}. Bump the local plugin package version before running the MemOS release.`,
+      `local_plugin_version input ${displayVersion(expectedVersion)} does not match the resolved OpenClaw local plugin docs version ${displayVersion(resolvedVersion)}.`,
     );
   }
   return {
     ok: true,
     expected_version: expectedVersion ? displayVersion(expectedVersion) : "",
-    previous_version: displayVersion(previousVersion),
-    version: displayVersion(currentVersion),
-    version_changed: previousVersion !== currentVersion,
+    previous_version: displayVersion(previousReleasedVersion),
+    version: displayVersion(resolvedVersion),
+    version_changed: resolvedVersion !== previousReleasedVersion,
     version_required: Boolean(evidence.has_user_facing_product_changes),
-    version_source: `${PRODUCT_PATH}/package.json`,
+    version_source: versionSource,
+    auto_incremented: autoIncremented,
+    package_previous_version: displayVersion(previousPackageVersion),
+    package_version: displayVersion(currentPackageVersion),
+    package_version_changed: previousPackageVersion !== currentPackageVersion,
   };
 }
 
@@ -585,6 +614,11 @@ export function collectLocalPluginEvidence({ previousTag, currentTag, currentRef
     local_plugin_version_raw: localPluginVersion.version_raw,
     local_plugin_version_changed: localPluginVersion.version_changed,
     local_plugin_version_source: localPluginVersion.version_source,
+    local_plugin_package_previous_version: localPluginVersion.previous_version,
+    local_plugin_package_previous_version_raw: localPluginVersion.previous_version_raw,
+    local_plugin_package_version: localPluginVersion.version,
+    local_plugin_package_version_raw: localPluginVersion.version_raw,
+    local_plugin_package_version_changed: localPluginVersion.version_changed,
     git_ref: currentRef,
     product_paths: PRODUCT_PATHS,
     has_product_changes: changedFiles.length > 0,
@@ -1180,6 +1214,9 @@ export function buildDocsPreview(draft, evidence) {
         local_plugin_version: evidence.local_plugin_version,
         local_plugin_previous_version: evidence.local_plugin_previous_version,
         local_plugin_version_source: evidence.local_plugin_version_source,
+        local_plugin_version_auto_incremented: evidence.local_plugin_version_auto_incremented,
+        local_plugin_package_version: evidence.local_plugin_package_version,
+        local_plugin_package_previous_version: evidence.local_plugin_package_previous_version,
         product_paths: evidence.product_paths,
       },
       products: {
@@ -1197,6 +1234,10 @@ export function buildDocsPreview(draft, evidence) {
     local_plugin_version: evidence.local_plugin_version,
     local_plugin_previous_version: evidence.local_plugin_previous_version,
     local_plugin_version_changed: evidence.local_plugin_version_changed,
+    local_plugin_version_source: evidence.local_plugin_version_source,
+    local_plugin_version_auto_incremented: evidence.local_plugin_version_auto_incremented,
+    local_plugin_package_version: evidence.local_plugin_package_version,
+    local_plugin_package_previous_version: evidence.local_plugin_package_previous_version,
     product_paths: evidence.product_paths,
     has_product_changes: evidence.has_product_changes,
     has_user_facing_product_changes: evidence.has_user_facing_product_changes,
@@ -1218,6 +1259,9 @@ export function docsPreviewMarkdown(preview, draft, evidence) {
     `- local_plugin_version: ${evidence.local_plugin_version || "n/a"}`,
     `- local_plugin_previous_version: ${evidence.local_plugin_previous_version || "n/a"}`,
     `- local_plugin_version_source: ${evidence.local_plugin_version_source || `${PRODUCT_PATH}/package.json`}`,
+    `- local_plugin_version_auto_incremented: ${Boolean(evidence.local_plugin_version_auto_incremented)}`,
+    `- local_plugin_package_version: ${evidence.local_plugin_package_version || "n/a"}`,
+    `- local_plugin_package_previous_version: ${evidence.local_plugin_package_previous_version || "n/a"}`,
     `- product_paths: ${evidence.product_paths.join(", ")}`,
     "",
   ];
@@ -1304,6 +1348,18 @@ export async function run() {
   });
   const localPluginVersionPlan = validateLocalPluginVersionPlan(evidence, process.env.LOCAL_PLUGIN_VERSION || "");
   evidence.local_plugin_version_plan = localPluginVersionPlan;
+  evidence.local_plugin_previous_version = localPluginVersionPlan.previous_version;
+  evidence.local_plugin_previous_version_raw = localPluginVersionPlan.previous_version.replace(/^v/, "");
+  evidence.local_plugin_version = localPluginVersionPlan.version;
+  evidence.local_plugin_version_raw = localPluginVersionPlan.version.replace(/^v/, "");
+  evidence.local_plugin_version_changed = localPluginVersionPlan.version_changed;
+  evidence.local_plugin_version_source = localPluginVersionPlan.version_source;
+  evidence.local_plugin_version_auto_incremented = localPluginVersionPlan.auto_incremented;
+  evidence.local_plugin_package_previous_version = localPluginVersionPlan.package_previous_version;
+  evidence.local_plugin_package_previous_version_raw = localPluginVersionPlan.package_previous_version.replace(/^v/, "");
+  evidence.local_plugin_package_version = localPluginVersionPlan.package_version;
+  evidence.local_plugin_package_version_raw = localPluginVersionPlan.package_version.replace(/^v/, "");
+  evidence.local_plugin_package_version_changed = localPluginVersionPlan.package_version_changed;
   evidence.memos_release_notes = {
     source: releaseNotes.source,
     name: releaseNotes.name,
@@ -1359,7 +1415,11 @@ export async function run() {
     local_plugin_version_changed: evidence.local_plugin_version_changed,
     local_plugin_version_required: localPluginVersionPlan.version_required,
     local_plugin_version_source: evidence.local_plugin_version_source,
+    local_plugin_version_auto_incremented: evidence.local_plugin_version_auto_incremented,
     local_plugin_expected_version: localPluginVersionPlan.expected_version,
+    local_plugin_package_version: evidence.local_plugin_package_version,
+    local_plugin_package_previous_version: evidence.local_plugin_package_previous_version,
+    local_plugin_package_version_changed: evidence.local_plugin_package_version_changed,
     existing_tag: existingTag,
     publish_blocked: existingTag.publish_blocked,
     target_ref: target.ref,
@@ -1405,7 +1465,11 @@ export async function run() {
       `- local_plugin_version_changed: ${evidence.local_plugin_version_changed}`,
       `- local_plugin_version_required: ${localPluginVersionPlan.version_required}`,
       `- local_plugin_version_source: ${evidence.local_plugin_version_source}`,
+      `- local_plugin_version_auto_incremented: ${evidence.local_plugin_version_auto_incremented}`,
       `- local_plugin_expected_version: ${localPluginVersionPlan.expected_version || "n/a"}`,
+      `- local_plugin_package_version: ${evidence.local_plugin_package_version}`,
+      `- local_plugin_package_previous_version: ${evidence.local_plugin_package_previous_version}`,
+      `- local_plugin_package_version_changed: ${evidence.local_plugin_package_version_changed}`,
       `- existing_tag_status: ${existingTag.status}`,
       `- existing_tag_sha: ${existingTag.tag_sha || "n/a"}`,
       `- publish_blocked: ${existingTag.publish_blocked}`,
@@ -1453,7 +1517,11 @@ export async function run() {
   appendOutput("local_plugin_version_changed", String(evidence.local_plugin_version_changed));
   appendOutput("local_plugin_version_required", String(localPluginVersionPlan.version_required));
   appendOutput("local_plugin_version_source", evidence.local_plugin_version_source);
+  appendOutput("local_plugin_version_auto_incremented", String(evidence.local_plugin_version_auto_incremented));
   appendOutput("local_plugin_expected_version", localPluginVersionPlan.expected_version || "");
+  appendOutput("local_plugin_package_version", evidence.local_plugin_package_version);
+  appendOutput("local_plugin_package_previous_version", evidence.local_plugin_package_previous_version);
+  appendOutput("local_plugin_package_version_changed", String(evidence.local_plugin_package_version_changed));
   appendOutput("existing_tag_status", existingTag.status);
   appendOutput("existing_tag_sha", existingTag.tag_sha || "");
   appendOutput("publish_blocked", String(existingTag.publish_blocked));

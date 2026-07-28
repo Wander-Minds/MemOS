@@ -18,6 +18,7 @@ import {
   fallbackTopicForText,
   findPreviousMemOSTag,
   generateGitHubReleaseNotes,
+  incrementPatchVersion,
   requestDocAgentDraft,
   sourceRefsFromText,
   validateDraft,
@@ -36,6 +37,12 @@ const evidence = {
   local_plugin_version_raw: "2.0.11",
   local_plugin_version_changed: true,
   local_plugin_version_source: "apps/memos-local-plugin/package.json",
+  local_plugin_version_auto_incremented: false,
+  local_plugin_package_previous_version: "v2.0.10",
+  local_plugin_package_previous_version_raw: "2.0.10",
+  local_plugin_package_version: "v2.0.11",
+  local_plugin_package_version_raw: "2.0.11",
+  local_plugin_package_version_changed: true,
   product_paths: ["apps/memos-local-plugin/**"],
   has_product_changes: true,
   has_user_facing_product_changes: true,
@@ -165,9 +172,11 @@ test("rejects leading v in manual version input", () => {
   assert.equal(cleanLocalPluginVersion("2.0.12"), "2.0.12");
   assert.throws(() => cleanLocalPluginVersion(""), /is required/);
   assert.throws(() => cleanLocalPluginVersion("v2.0.12"), /must not include a leading v/);
+  assert.equal(incrementPatchVersion("2.0.12"), "2.0.13");
+  assert.throws(() => incrementPatchVersion("2.0.12-beta.1"), /Cannot auto-increment prerelease/);
 });
 
-test("requires local plugin version to increase for user-facing plugin changes", () => {
+test("resolves the local plugin docs version from package or auto patch increment", () => {
   assert.deepEqual(validateLocalPluginVersionPlan(evidence, ""), {
     ok: true,
     expected_version: "",
@@ -176,6 +185,10 @@ test("requires local plugin version to increase for user-facing plugin changes",
     version_changed: true,
     version_required: true,
     version_source: "apps/memos-local-plugin/package.json",
+    auto_incremented: false,
+    package_previous_version: "v2.0.10",
+    package_version: "v2.0.11",
+    package_version_changed: true,
   });
   assert.deepEqual(validateLocalPluginVersionPlan(evidence, "2.0.11"), {
     ok: true,
@@ -185,21 +198,74 @@ test("requires local plugin version to increase for user-facing plugin changes",
     version_changed: true,
     version_required: true,
     version_source: "apps/memos-local-plugin/package.json",
+    auto_incremented: false,
+    package_previous_version: "v2.0.10",
+    package_version: "v2.0.11",
+    package_version_changed: true,
   });
   assert.throws(() => validateLocalPluginVersionPlan(evidence, "2.0.12"), /does not match/);
-  assert.throws(
-    () =>
-      validateLocalPluginVersionPlan({
+
+  assert.deepEqual(
+    validateLocalPluginVersionPlan({
+      ...evidence,
+      local_plugin_previous_version: "v2.0.10",
+      local_plugin_previous_version_raw: "2.0.10",
+      local_plugin_version: "v2.0.10",
+      local_plugin_version_raw: "2.0.10",
+      local_plugin_version_changed: false,
+      local_plugin_package_version: "v2.0.10",
+      local_plugin_package_version_raw: "2.0.10",
+      local_plugin_package_version_changed: false,
+    }),
+    {
+      ok: true,
+      expected_version: "",
+      previous_version: "v2.0.10",
+      version: "v2.0.11",
+      version_changed: true,
+      version_required: true,
+      version_source: "auto_patch_from_previous_released_version",
+      auto_incremented: true,
+      package_previous_version: "v2.0.10",
+      package_version: "v2.0.10",
+      package_version_changed: false,
+    },
+  );
+  assert.doesNotThrow(() =>
+    validateLocalPluginVersionPlan(
+      {
         ...evidence,
         local_plugin_previous_version: "v2.0.10",
         local_plugin_previous_version_raw: "2.0.10",
         local_plugin_version: "v2.0.10",
         local_plugin_version_raw: "2.0.10",
         local_plugin_version_changed: false,
-      }),
-    /version did not increase/,
+        local_plugin_package_version: "v2.0.10",
+        local_plugin_package_version_raw: "2.0.10",
+        local_plugin_package_version_changed: false,
+      },
+      "2.0.11",
+    ),
   );
-  assert.doesNotThrow(() =>
+  assert.throws(
+    () =>
+      validateLocalPluginVersionPlan(
+        {
+          ...evidence,
+          local_plugin_previous_version: "v2.0.10",
+          local_plugin_previous_version_raw: "2.0.10",
+          local_plugin_version: "v2.0.10",
+          local_plugin_version_raw: "2.0.10",
+          local_plugin_version_changed: false,
+          local_plugin_package_version: "v2.0.10",
+          local_plugin_package_version_raw: "2.0.10",
+          local_plugin_package_version_changed: false,
+        },
+        "2.0.12",
+      ),
+    /does not match/,
+  );
+  assert.deepEqual(
     validateLocalPluginVersionPlan({
       ...evidence,
       has_user_facing_product_changes: false,
@@ -208,7 +274,34 @@ test("requires local plugin version to increase for user-facing plugin changes",
       local_plugin_version: "v2.0.10",
       local_plugin_version_raw: "2.0.10",
       local_plugin_version_changed: false,
+      local_plugin_package_version: "v2.0.10",
+      local_plugin_package_version_raw: "2.0.10",
+      local_plugin_package_version_changed: false,
     }),
+    {
+      ok: true,
+      expected_version: "",
+      previous_version: "v2.0.10",
+      version: "v2.0.10",
+      version_changed: false,
+      version_required: false,
+      version_source: "unchanged_no_user_facing_changes",
+      auto_incremented: false,
+      package_previous_version: "v2.0.10",
+      package_version: "v2.0.10",
+      package_version_changed: false,
+    },
+  );
+  assert.throws(
+    () =>
+      validateLocalPluginVersionPlan({
+        ...evidence,
+        local_plugin_package_previous_version: "v2.0.10",
+        local_plugin_package_previous_version_raw: "2.0.10",
+        local_plugin_package_version: "v2.0.9",
+        local_plugin_package_version_raw: "2.0.9",
+      }),
+    /moved backwards/,
   );
 });
 
