@@ -1,30 +1,33 @@
-name: MemOS Release — Post-Merge Dry Run
+name: MemOS Release — Branch Dry Run
 
 on:
-  push:
+  pull_request:
     branches:
       - main
+    types:
+      - opened
+      - reopened
+      - synchronize
+      - ready_for_review
+      - edited
 
 permissions:
   contents: read
 
+concurrency:
+  group: memos-release-branch-dry-run-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
 jobs:
   dry-run:
-    if: >-
-      ${{
-        github.repository == 'MemTensor/MemOS' &&
-        (
-          contains(github.event.head_commit.message, 'release: merge dev-v') ||
-          contains(github.event.head_commit.message, 'dev-v') ||
-          contains(github.event.head_commit.message, 'Merge 2.0.') ||
-          contains(github.event.head_commit.message, 'chore: update version to v')
-        )
-      }}
+    if: ${{ github.repository == 'MemTensor/MemOS' && github.event.pull_request.head.repo.full_name == github.repository && startsWith(github.head_ref, 'dev-v') }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
         with:
+          ref: ${{ github.event.pull_request.head.sha }}
           fetch-depth: 0
+          persist-credentials: false
 
       - uses: actions/setup-node@v4
         with:
@@ -37,68 +40,51 @@ jobs:
           git fetch --tags --force origin
           git fetch origin '+refs/heads/*:refs/remotes/origin/*'
 
-      - name: Infer next stable release version for preview
+      - name: Infer release version from branch
         id: version
         shell: bash
         env:
-          HEAD_COMMIT_MESSAGE: ${{ github.event.head_commit.message }}
+          RELEASE_BRANCH: ${{ github.head_ref }}
         run: |
           set -euo pipefail
-          message_version="$(
-            printf '%s\n' "${HEAD_COMMIT_MESSAGE}" |
-              sed -nE \
-                -e 's/.*dev-v([0-9]+\.[0-9]+\.[0-9]+).*/\1/p' \
-                -e 's/.*Merge v([0-9]+\.[0-9]+\.[0-9]+) into main.*/\1/p' \
-                -e 's/.*Merge ([0-9]+\.[0-9]+\.[0-9]+) into main.*/\1/p' \
-                -e 's/.*update version to v([0-9]+\.[0-9]+\.[0-9]+).*/\1/p' |
-              head -n 1
-          )"
-          latest="$(
-            git tag --list 'v[0-9]*.[0-9]*.[0-9]*' --merged origin/main --sort=-v:refname |
-              grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' |
-              head -n 1
-          )"
-          if [ -z "${latest}" ]; then
-            echo "::error::Cannot infer the latest MemOS stable tag from origin/main."
+          if [[ ! "${RELEASE_BRANCH}" =~ ^dev-v([0-9]+\.[0-9]+\.[0-9]+)$ ]]; then
+            echo "::error::Release branch must be named like dev-v2.0.26; got ${RELEASE_BRANCH}."
             exit 1
           fi
-          version="${latest#v}"
-          IFS=. read -r major minor patch <<< "${version}"
-          next_version="${message_version:-${major}.${minor}.$((patch + 1))}"
-          echo "version=${next_version}" >> "${GITHUB_OUTPUT}"
-          echo "latest_tag=${latest}" >> "${GITHUB_OUTPUT}"
-          echo "message_version=${message_version}" >> "${GITHUB_OUTPUT}"
+          version="${BASH_REMATCH[1]}"
+          echo "version=${version}" >> "${GITHUB_OUTPUT}"
+          echo "release_branch=${RELEASE_BRANCH}" >> "${GITHUB_OUTPUT}"
 
       - name: Run release workflow tests
         shell: bash
         run: node --test .github/scripts/prepare-memos-release.test.mjs
 
-      - name: Prepare offline release inspection
+      - name: Prepare release branch inspection
         id: prepare
         shell: bash
         env:
           RELEASE_VERSION: ${{ steps.version.outputs.version }}
-          TARGET_REF: origin/main
+          TARGET_REF: HEAD
+          RELEASE_BRANCH: ${{ steps.version.outputs.release_branch }}
           DRY_RUN: true
           GITHUB_TOKEN: ${{ github.token }}
           ALLOW_OFFLINE_DOCS_PREVIEW: true
         run: |
-          bash .github/scripts/retry.sh --attempts 2 --label "prepare offline MemOS release inspection" -- \
+          bash .github/scripts/retry.sh --attempts 2 --label "prepare release branch MemOS inspection" -- \
             node .github/scripts/prepare-memos-release.mjs
 
-      - name: Upload release inspection
+      - name: Upload release branch inspection
         uses: actions/upload-artifact@v4
         with:
-          name: memos-release-inspection
+          name: memos-release-branch-inspection
           path: ${{ steps.prepare.outputs.inspection_dir }}
           if-no-files-found: error
 
-      - name: Summarize inspection
+      - name: Summarize release branch inspection
         shell: bash
         env:
+          RELEASE_BRANCH: ${{ steps.version.outputs.release_branch }}
           VERSION: ${{ steps.version.outputs.version }}
-          LATEST_TAG: ${{ steps.version.outputs.latest_tag }}
-          MESSAGE_VERSION: ${{ steps.version.outputs.message_version }}
           CURRENT_TAG: ${{ steps.prepare.outputs.current_tag }}
           PREVIOUS_TAG: ${{ steps.prepare.outputs.previous_tag }}
           LOCAL_PLUGIN_VERSION: ${{ steps.prepare.outputs.local_plugin_version }}
@@ -111,11 +97,10 @@ jobs:
           LOCAL_PLUGIN_VERSION_INPUT_IGNORED_REASON: ${{ steps.prepare.outputs.local_plugin_version_input_ignored_reason }}
           LOCAL_PLUGIN_PACKAGE_VERSION: ${{ steps.prepare.outputs.local_plugin_package_version }}
           LOCAL_PLUGIN_PACKAGE_PREVIOUS_VERSION: ${{ steps.prepare.outputs.local_plugin_package_previous_version }}
-          LOCAL_PLUGIN_PACKAGE_VERSION_CHANGED: ${{ steps.prepare.outputs.local_plugin_package_version_changed }}
           EXISTING_TAG_STATUS: ${{ steps.prepare.outputs.existing_tag_status }}
-          EXISTING_TAG_SHA: ${{ steps.prepare.outputs.existing_tag_sha }}
           PUBLISH_BLOCKED: ${{ steps.prepare.outputs.publish_blocked }}
           PUBLISH_BLOCK_REASON: ${{ steps.prepare.outputs.publish_block_reason }}
+          TARGET_SHA: ${{ steps.prepare.outputs.target_sha }}
           HAS_PRODUCT_CHANGES: ${{ steps.prepare.outputs.has_product_changes }}
           HAS_USER_FACING_PRODUCT_CHANGES: ${{ steps.prepare.outputs.has_user_facing_product_changes }}
           DOCS_ACTION: ${{ steps.prepare.outputs.docs_action }}
@@ -123,13 +108,13 @@ jobs:
           RELEASE_NOTES_SOURCE: ${{ steps.prepare.outputs.release_notes_source }}
         run: |
           {
-            echo "## MemOS release post-merge dry run"
+            echo "## MemOS release branch dry run"
             echo ""
+            echo "- release_branch: ${RELEASE_BRANCH}"
             echo "- inferred_version: ${VERSION}"
-            echo "- latest_tag_on_main: ${LATEST_TAG}"
-            echo "- version_from_commit_message: ${MESSAGE_VERSION:-n/a}"
             echo "- current_tag: ${CURRENT_TAG}"
             echo "- previous_tag: ${PREVIOUS_TAG}"
+            echo "- target_sha: ${TARGET_SHA}"
             echo "- local_plugin_version: ${LOCAL_PLUGIN_VERSION}"
             echo "- local_plugin_previous_version: ${LOCAL_PLUGIN_PREVIOUS_VERSION}"
             echo "- local_plugin_version_changed: ${LOCAL_PLUGIN_VERSION_CHANGED}"
@@ -140,9 +125,7 @@ jobs:
             echo "- local_plugin_version_input_ignored_reason: ${LOCAL_PLUGIN_VERSION_INPUT_IGNORED_REASON:-n/a}"
             echo "- local_plugin_package_version: ${LOCAL_PLUGIN_PACKAGE_VERSION}"
             echo "- local_plugin_package_previous_version: ${LOCAL_PLUGIN_PACKAGE_PREVIOUS_VERSION}"
-            echo "- local_plugin_package_version_changed: ${LOCAL_PLUGIN_PACKAGE_VERSION_CHANGED}"
             echo "- existing_tag_status: ${EXISTING_TAG_STATUS}"
-            echo "- existing_tag_sha: ${EXISTING_TAG_SHA:-n/a}"
             echo "- publish_blocked: ${PUBLISH_BLOCKED}"
             echo "- publish_block_reason: ${PUBLISH_BLOCK_REASON:-n/a}"
             echo "- release_notes_source: ${RELEASE_NOTES_SOURCE}"
@@ -151,5 +134,6 @@ jobs:
             echo "- docs_action: ${DOCS_ACTION}"
             echo "- skip_reason: ${SKIP_REASON:-n/a}"
             echo ""
-            echo "This post-merge check never creates tags, GitHub Releases, docs PRs, or deployments."
+            echo "This release-branch check is preview-only. It never creates tags, GitHub Releases, docs PRs, or deployments."
+            echo "After this branch is merged to main, use the main post-merge inspection as the final release artifact."
           } >> "${GITHUB_STEP_SUMMARY}"

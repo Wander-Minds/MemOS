@@ -67,6 +67,7 @@ jobs:
         env:
           RELEASE_VERSION: ${{ inputs.version }}
           TARGET_REF: ${{ inputs.target_ref || 'main' }}
+          RELEASE_BRANCH: ${{ inputs.target_ref || 'main' }}
           LOCAL_PLUGIN_VERSION: ${{ inputs.local_plugin_version }}
           DRY_RUN: ${{ inputs.dry_run }}
           PUBLISH_CONFIRMATION: ${{ inputs.publish_confirmation }}
@@ -108,6 +109,8 @@ jobs:
           SOURCE_ID: ${{ steps.prepare.outputs.source_id }}
           TARGET_REF: ${{ steps.prepare.outputs.target_ref }}
           TARGET_SHA: ${{ steps.prepare.outputs.target_sha }}
+          RELEASE_BRANCH: ${{ steps.prepare.outputs.release_branch }}
+          RELEASE_BRANCH_VERSION: ${{ steps.prepare.outputs.release_branch_version }}
           HAS_PRODUCT_CHANGES: ${{ steps.prepare.outputs.has_product_changes }}
           HAS_USER_FACING_PRODUCT_CHANGES: ${{ steps.prepare.outputs.has_user_facing_product_changes }}
           DOCS_ACTION: ${{ steps.prepare.outputs.docs_action }}
@@ -140,6 +143,8 @@ jobs:
             echo "- publish_block_reason: ${PUBLISH_BLOCK_REASON:-n/a}"
             echo "- target_ref: ${TARGET_REF}"
             echo "- target_sha: ${TARGET_SHA}"
+            echo "- release_branch: ${RELEASE_BRANCH:-n/a}"
+            echo "- release_branch_version: ${RELEASE_BRANCH_VERSION:-n/a}"
             echo "- release_notes_source: ${RELEASE_NOTES_SOURCE}"
             echo "- local_plugin_changed: ${HAS_PRODUCT_CHANGES}"
             echo "- local_plugin_user_facing_changed: ${HAS_USER_FACING_PRODUCT_CHANGES}"

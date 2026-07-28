@@ -4,6 +4,7 @@ on:
   pull_request:
     paths:
       - ".github/workflows/memos-release-publish.yml"
+      - ".github/workflows/memos-release-branch-dry-run.yml"
       - ".github/workflows/memos-release-pre-merge-dry-run.yml"
       - ".github/workflows/memos-release-post-merge-dry-run.yml"
       - ".github/scripts/prepare-memos-release.mjs"

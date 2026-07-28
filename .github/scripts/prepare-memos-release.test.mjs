@@ -20,8 +20,10 @@ import {
   generateGitHubReleaseNotes,
   incrementPatchVersion,
   requestDocAgentDraft,
+  releaseBranchVersion,
   sourceRefsFromText,
   validateDraft,
+  validateReleaseBranchVersion,
   validateLocalPluginVersionPlan,
   validatePublishConfirmation,
   validateReleaseTarget,
@@ -445,6 +447,31 @@ test("allows flexible target refs only for dry runs", () => {
   assert.doesNotThrow(() => validateReleaseTarget({ dryRun: "false", targetRef: "main" }));
   assert.throws(() => validateReleaseTarget({ dryRun: "false", targetRef: "origin/main" }), /exactly main/);
   assert.throws(() => validateReleaseTarget({ dryRun: "false", targetRef: "feature/test" }), /exactly main/);
+});
+
+test("guards release branch previews against mismatched MemOS versions", () => {
+  assert.deepEqual(releaseBranchVersion("dev-v2.0.26"), { branch: "dev-v2.0.26", version: "2.0.26" });
+  assert.deepEqual(releaseBranchVersion("origin/dev-v2.0.27"), { branch: "dev-v2.0.27", version: "2.0.27" });
+  assert.deepEqual(releaseBranchVersion("refs/heads/dev-v2.0.28"), { branch: "dev-v2.0.28", version: "2.0.28" });
+  assert.deepEqual(validateReleaseBranchVersion({ version: "2.0.26", targetRef: "dev-v2.0.26" }), {
+    branch: "dev-v2.0.26",
+    version: "2.0.26",
+  });
+  assert.deepEqual(
+    validateReleaseBranchVersion({ version: "2.0.26", targetRef: "HEAD", releaseBranch: "dev-v2.0.26" }),
+    {
+      branch: "dev-v2.0.26",
+      version: "2.0.26",
+    },
+  );
+  assert.deepEqual(validateReleaseBranchVersion({ version: "2.0.26", targetRef: "main" }), {
+    branch: "main",
+    version: "",
+  });
+  assert.throws(
+    () => validateReleaseBranchVersion({ version: "2.0.26", targetRef: "origin/dev-v2.0.27" }),
+    /Release branch dev-v2\.0\.27 is for v2\.0\.27/,
+  );
 });
 
 test("reports absent, matching, and conflicting manual release tags", () => {
