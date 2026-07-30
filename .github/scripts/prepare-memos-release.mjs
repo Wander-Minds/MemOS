@@ -9,8 +9,8 @@ export const PRODUCT_ID = "openclaw-local-plugin";
 export const PRODUCT_PATH = "apps/memos-local-plugin";
 export const PRODUCT_PATHS = [`${PRODUCT_PATH}/**`];
 export const PRODUCT_TITLE = {
-  zh: "OpenClaw 本地插件",
-  en: "OpenClaw Local Plugin",
+  zh: "MemOS 本地插件",
+  en: "MemOS Local Plugin",
 };
 export const RELEASE_CATEGORY_ORDER = ["Added", "Improved", "Fixed"];
 export const RELEASE_TO_DOC_CATEGORY = {

@@ -423,7 +423,7 @@ jobs:
               gh release create "${release_tag}" \
                 --repo "${GITHUB_REPOSITORY}" \
                 --target "$(git rev-parse HEAD)" \
-                --title "OpenClaw Local Plugin v${RELEASE_VERSION}" \
+                --title "MemOS Local Plugin v${RELEASE_VERSION}" \
                 --notes-file "${RELEASE_NOTES_FILE}" \
                 "${release_flags[@]}"
               status=$?

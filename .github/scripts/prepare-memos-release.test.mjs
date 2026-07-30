@@ -960,11 +960,11 @@ test("builds Plugin tab previews without exposing source refs in page content", 
   assert.equal(preview.cn.source.memos_release_tag, "v2.0.25");
   assert.equal(preview.cn.source.local_plugin_version, "v2.0.11");
   assert.deepEqual(preview.cn.source.product_paths, ["apps/memos-local-plugin/**"]);
-  assert.equal(preview.cn.products.plugin["New Features"][0].type, "OpenClaw 本地插件");
-  assert.equal(preview.en.products.plugin.Improvements[0].type, "OpenClaw Local Plugin");
+  assert.equal(preview.cn.products.plugin["New Features"][0].type, "MemOS 本地插件");
+  assert.equal(preview.en.products.plugin.Improvements[0].type, "MemOS Local Plugin");
 
   const markdown = docsPreviewMarkdown(preview, validDraft, evidence);
-  assert.match(markdown, /OpenClaw 本地插件-v2\.0\.11/);
+  assert.match(markdown, /MemOS 本地插件-v2\.0\.11/);
   assert.match(markdown, /memos_release_range: v2\.0\.24\.\.\.v2\.0\.25/);
   assert.match(markdown, /Source Refs/);
   assert.match(markdown, /9deb941e/);
