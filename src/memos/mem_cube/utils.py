@@ -48,9 +48,11 @@ def merge_config_with_default(
         GeneralMemCubeConfig: Merged configuration
     """
 
-    # Convert configs to dictionaries
-    existing_dict = existing_config.model_dump(mode="json")
-    default_dict = default_config.model_dump(mode="json")
+    # Convert configs to dictionaries (factory `config` fields may hold
+    # resolved pydantic backend configs; `warnings="none"` matches
+    # BaseConfig.to_json_file and avoids PydanticSerializationUnexpectedValue).
+    existing_dict = existing_config.model_dump(mode="json", warnings="none")
+    default_dict = default_config.model_dump(mode="json", warnings="none")
 
     logger.info(
         f"Starting config merge for user {existing_config.user_id}, cube {existing_config.cube_id}"

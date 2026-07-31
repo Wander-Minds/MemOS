@@ -115,3 +115,7 @@ class BaseVecDB(ABC):
         Args:
             fields (list[str]): List of field names to index (as keyword).
         """
+
+    @abstractmethod
+    def close(self) -> None:
+        """Release any underlying resources (e.g. file locks on local stores)."""

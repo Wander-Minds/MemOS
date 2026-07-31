@@ -27,7 +27,11 @@ class FactorySingleton:
 
         # Handle configuration objects - only use the config parameter
         if hasattr(config, "model_dump"):  # Pydantic model
-            config_data = config.model_dump()
+            # Factory configs hold the resolved backend config (a pydantic
+            # model) in a `config: dict[str, Any]` field, so dumping without
+            # `warnings="none"` emits PydanticSerializationUnexpectedValue
+            # noise on every cache-key lookup.
+            config_data = config.model_dump(warnings="none")
         elif hasattr(config, "dict"):  # Legacy Pydantic model
             config_data = config.dict()
         elif isinstance(config, dict):

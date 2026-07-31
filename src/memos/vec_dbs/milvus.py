@@ -686,3 +686,12 @@ class MilvusVecDB(BaseVecDB):
             collection_name=collection_name,
             filter=expr,
         )
+
+    def close(self) -> None:
+        """Release the underlying Milvus client connection."""
+        if self.client is None:
+            return
+        try:
+            self.client.close()
+        finally:
+            self.client = None

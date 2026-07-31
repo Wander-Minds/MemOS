@@ -252,9 +252,17 @@ class NacosConfigManager:
             raise Exception(f"❌ Nacos AK/SK init fail: {e}") from e
 
 
-# init Nacos
-NacosConfigManager.init()
-NacosConfigManager.start_watch_if_enabled()
+def init_nacos() -> None:
+    """Fetch config from Nacos and start the watch thread (API-service startup).
+
+    This must be called explicitly by the API server (e.g. after ``load_dotenv``)
+    instead of at import time: importing ``memos.api.config`` happens for every
+    MemOS client (via the scheduler import chain), and auto-running ``init()``
+    there emitted a spurious "missing NACOS_SERVER_ADDR / AK / SK / DATA_ID"
+    warning on every process that does not use Nacos at all.
+    """
+    NacosConfigManager.init()
+    NacosConfigManager.start_watch_if_enabled()
 
 
 class APIConfig:

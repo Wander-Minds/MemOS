@@ -34,10 +34,21 @@ def kv_memory(dummy_config):
 
 
 def make_filled_cache():
-    # Create a DynamicCache with at least one dummy tensor layer
+    # Create a DynamicCache with at least one dummy tensor layer.
+    # transformers >= 4.5x moved per-layer tensors into `cache.layers`
+    # (DynamicLayer) and removed the old `key_cache`/`value_cache` lists;
+    # keep this helper compatible with both APIs so the merge path in
+    # KVCacheMemory._concat_caches is exercised on any transformers version.
     cache = DynamicCache()
-    cache.key_cache.append(torch.zeros(1, 2, 3))
-    cache.value_cache.append(torch.zeros(1, 2, 3))
+    key = torch.zeros(1, 2, 3)
+    value = torch.zeros(1, 2, 3)
+    if hasattr(cache, "key_cache"):
+        # Old transformers: plain key_cache/value_cache lists
+        cache.key_cache.append(key)
+        cache.value_cache.append(value)
+    else:
+        # New transformers: update() appends a DynamicLayer to cache.layers
+        cache.update(key, value, 0)
     return cache
 
 
@@ -58,9 +69,13 @@ def test_get_cache_merge(kv_memory):
     kv_memory.add([item1, item2])
     merged = kv_memory.get_cache([item1.id, item2.id])
     assert isinstance(merged, DynamicCache)
-    # Check the number of layers in merged key/value cache
-    assert len(merged.key_cache) == 1
-    assert len(merged.value_cache) == 1
+    # Check the number of layers in the merged cache (old API: key/value
+    # cache lists; new API: per-layer `layers`).
+    if hasattr(merged, "key_cache"):
+        assert len(merged.key_cache) == 1
+        assert len(merged.value_cache) == 1
+    else:
+        assert len(merged.layers) == 1
 
 
 def test_delete_and_get_all(kv_memory):

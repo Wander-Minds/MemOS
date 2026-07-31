@@ -71,20 +71,22 @@ class GeneralMemCube(BaseMemCube):
             memory_types = ["text_mem", "act_mem", "para_mem", "pref_mem"]
 
         # Load specified memory types
-        if "text_mem" in memory_types and self.text_mem:
-            self.text_mem.load(dir)
+        # Note: check the private attributes so that uninitialized memories do
+        # not emit the "not initialized" property warning on every load.
+        if "text_mem" in memory_types and self._text_mem is not None:
+            self._text_mem.load(dir)
             logger.debug(f"Loaded text_mem from {dir}")
 
-        if "act_mem" in memory_types and self.act_mem:
-            self.act_mem.load(dir)
+        if "act_mem" in memory_types and self._act_mem is not None:
+            self._act_mem.load(dir)
             logger.info(f"Loaded act_mem from {dir}")
 
-        if "para_mem" in memory_types and self.para_mem:
-            self.para_mem.load(dir)
+        if "para_mem" in memory_types and self._para_mem is not None:
+            self._para_mem.load(dir)
             logger.info(f"Loaded para_mem from {dir}")
 
-        if "pref_mem" in memory_types and self.pref_mem:
-            self.pref_mem.load(dir)
+        if "pref_mem" in memory_types and self._pref_mem is not None:
+            self._pref_mem.load(dir)
             logger.info(f"Loaded pref_mem from {dir}")
 
         logger.info(f"MemCube loaded successfully from {dir} (types: {memory_types})")
@@ -113,21 +115,22 @@ class GeneralMemCube(BaseMemCube):
         if memory_types is None:
             memory_types = ["text_mem", "act_mem", "para_mem", "pref_mem"]
 
-        # Dump specified memory types
-        if "text_mem" in memory_types and self.text_mem:
-            self.text_mem.dump(dir)
+        # Dump specified memory types (private attr checks avoid the
+        # "not initialized" property warning for uninitialized memories).
+        if "text_mem" in memory_types and self._text_mem is not None:
+            self._text_mem.dump(dir)
             logger.info(f"Dumped text_mem to {dir}")
 
-        if "act_mem" in memory_types and self.act_mem:
-            self.act_mem.dump(dir)
+        if "act_mem" in memory_types and self._act_mem is not None:
+            self._act_mem.dump(dir)
             logger.info(f"Dumped act_mem to {dir}")
 
-        if "para_mem" in memory_types and self.para_mem:
-            self.para_mem.dump(dir)
+        if "para_mem" in memory_types and self._para_mem is not None:
+            self._para_mem.dump(dir)
             logger.info(f"Dumped para_mem to {dir}")
 
-        if "pref_mem" in memory_types and self.pref_mem:
-            self.pref_mem.dump(dir)
+        if "pref_mem" in memory_types and self._pref_mem is not None:
+            self._pref_mem.dump(dir)
             logger.info(f"Dumped pref_mem to {dir}")
 
         logger.info(f"MemCube dumped successfully to {dir} (types: {memory_types})")

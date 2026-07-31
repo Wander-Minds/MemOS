@@ -29,6 +29,7 @@ from starlette.requests import Request
 from starlette.responses import Response
 
 # Import Krolik extensions
+from memos.api.config import init_nacos
 from memos.api.lifecycle import shutdown_components
 from memos.api.middleware.rate_limit import RateLimitMiddleware
 
@@ -47,6 +48,10 @@ except ImportError:
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
 logger = logging.getLogger(__name__)
+
+# Sync config from Nacos if configured (previously ran on every import of
+# memos.api.config; now explicit at API-service startup).
+init_nacos()
 
 
 class SecurityHeadersMiddleware(BaseHTTPMiddleware):

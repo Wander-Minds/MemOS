@@ -641,8 +641,11 @@ class MOSCore:
             def search_preference_memory(cube_id, cube):
                 if (
                     (cube_id in install_cube_ids)
-                    and (cube.pref_mem is not None)
                     and self.config.enable_preference_memory
+                    # Only touch cube.pref_mem after the enable check so that
+                    # cubes without preference memory stay quiet (the property
+                    # warns "not initialized" when unset).
+                    and (cube.pref_mem is not None)
                 ):
                     time_start = time.time()
                     memories = cube.pref_mem.search(

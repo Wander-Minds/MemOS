@@ -69,7 +69,7 @@ class QdrantVecDB(BaseVecDB):
 
         if self.collection_exists(self.config.collection_name):
             collection_info = self.client.get_collection(self.config.collection_name)
-            logger.warning(
+            logger.info(
                 f"Collection '{self.config.collection_name}' (vector dimension: {collection_info.config.params.vectors.size}) already exists. Skipping creation."
             )
 
@@ -323,6 +323,12 @@ class QdrantVecDB(BaseVecDB):
         Args:
             fields (list[str]): List of field names to index (as keyword).
         """
+        # Payload indexes only exist on a Qdrant server; the embedded/local
+        # client ignores them and emits a UserWarning on every call, so skip
+        # index creation entirely in local mode.
+        if self.config.host is None and self.config.port is None:
+            logger.debug("Skipping payload indexes: local/embedded Qdrant does not support them.")
+            return
         for field in fields:
             try:
                 self.client.create_payload_index(
@@ -353,3 +359,17 @@ class QdrantVecDB(BaseVecDB):
             collection_name=self.config.collection_name,
             points_selector=models.PointIdsList(points=point_ids),
         )
+
+    def close(self) -> None:
+        """Release the underlying Qdrant client.
+
+        In local/embedded mode the client holds an exclusive file lock on the
+        storage folder, so it must be closed before the same folder can be
+        reopened (e.g. dump then reload in one process).
+        """
+        if self.client is None:
+            return
+        try:
+            self.client.close()
+        finally:
+            self.client = None

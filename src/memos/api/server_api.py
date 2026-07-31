@@ -9,6 +9,7 @@ from fastapi import FastAPI, HTTPException
 from fastapi.exceptions import RequestValidationError
 from starlette.staticfiles import StaticFiles
 
+from memos.api.config import init_nacos
 from memos.api.exceptions import APIExceptionHandler
 from memos.api.lifecycle import shutdown_components
 from memos.api.middleware.request_context import RequestContextMiddleware
@@ -17,6 +18,11 @@ from memos.plugins.manager import plugin_manager
 
 
 load_dotenv()
+
+# Sync config from Nacos if configured (must run after load_dotenv so env
+# vars from .env are visible). Previously this ran on every import of
+# memos.api.config, spamming a warning on processes that never use Nacos.
+init_nacos()
 
 plugin_manager.discover()
 
