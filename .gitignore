@@ -1,6 +1,9 @@
 # MemOS home
 .memos/
 
+# KimiX cache
+.kimix_cache/
+
 # Temporary files
 tmp/
 **/tmp_data/
@@ -183,6 +186,10 @@ venv.bak/
 
 # but do not ignore docs/openapi.json
 !docs/openapi.json
+
+# do not ignore KimiX workspace config
+!.kimix/
+!.kimix/*.json
 
 # do not ignore apps/ config files
 !apps/**/*.json
