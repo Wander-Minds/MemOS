@@ -247,6 +247,12 @@ evaluation/data/
 test_add_pipeline.py
 test_file_pipeline.py
 
+# llama.cpp ext build dirs (built by ext/build_llama_cpp.py)
+ext/build-*
+
+# Local GGUF models (downloaded separately, see models/)
+models/
+
 # spec
 .ai-tasks/
 openspecs/
